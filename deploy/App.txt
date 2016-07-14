@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>release-progress-kpi</title>
+    <!--  (c) 2015,2016 CA Technologies.  All Rights Reserved. -->
+    <!--  Build Date: Thu Jul 14 2016 10:33:28 GMT-0400 (EDT) -->
+    
+    <script type="text/javascript">
+        var APP_BUILD_DATE = "Thu Jul 14 2016 10:33:28 GMT-0400 (EDT)";
+        var CHECKSUM = 29289308861;
+    </script>
+    
+    <script type="text/javascript" src="/apps/2.1/sdk.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function() {
+             
+/**
+ * A link that pops up a version dialog box
+ */
+
+Ext.define('Rally.technicalservices.InfoLink',{
+    extend: 'Rally.ui.dialog.Dialog',
+    alias: 'widget.tsinfolink',
+    
+    /**
+     * @cfg {String} informationHtml
+     * Additional text to be displayed on the popup dialog (for exmaple,
+     * to add a description of the app's use or functionality)
+     */
+    informationHtml: null,
+    
+    /**
+     * 
+     * cfg {String} title
+     * The title for the dialog box
+     */
+    title: "Build Information",
+    
+    defaults: { padding: 5, margin: 5 },
+
+    closable: true,
+     
+    draggable: true,
+
+    autoShow: true,
+   
+    width: 350, 
+    
+    initComponent: function() {
+        var id = Ext.id(this);
+        this.title =  "<span class='icon-help'> </span>" + this.title;
+        this.callParent(arguments);
+    },
+    
+    _generateChecksum: function(string){
+        var chk = 0x12345678,
+            i;
+        string = string.replace(/var CHECKSUM = .*;/,"");
+        string = string.replace(/\s/g,"");  //Remove all whitespace from the string.
+        
+        for (i = 0; i < string.length; i++) {
+            chk += (string.charCodeAt(i) * i);
+        }
+    
+        return chk;
+    },
+    
+    _checkChecksum: function(container) {
+        var deferred = Ext.create('Deft.Deferred');
+        console.log("_checkChecksum", container);
+        var me = this;
+        
+        Ext.Ajax.request({
+            url: document.URL,
+            params: {
+                id: 1
+            },
+            success: function (response) {
+                text = response.responseText;
+                if ( CHECKSUM ) {
+                    if ( CHECKSUM !== me._generateChecksum(text) ) {
+                        console.log("Checksums don't match!");
+                        deferred.resolve(false);
+                        return;
+                    }
+                }
+                deferred.resolve(true);
+            }
+        });
+        
+        return deferred.promise;
+    },
+    
+    afterRender: function() {
+        var app = Rally.getApp();
+        
+        if (! app.isExternal() ) {
+                
+            this._checkChecksum(app).then({
+                scope: this,
+                success: function(result){
+                    if ( !result ) {
+                        this.addDocked({
+                            xtype:'container',
+                            cls: 'build-info',
+                            padding: 2,
+                            html:'<span class="icon-warning"> </span>Checksums do not match'
+                        });
+                    }
+                },
+                failure: function(msg){
+                    console.log("oops:",msg);
+                }
+            });
+        } else {
+            this.addDocked({
+                xtype:'container',
+                cls: 'build-info',
+                padding: 2,
+                html:'... Running externally'
+            });
+        }
+        this.callParent(arguments);
+    },
+    
+    beforeRender: function() {
+        var me = this;
+        this.callParent(arguments);
+
+        if (this.informationHtml) {
+            this.addDocked({
+                xtype: 'component',
+                componentCls: 'intro-panel',
+                padding: 2,
+                html: this.informationHtml
+            });
+        }
+        
+        this.addDocked({
+            xtype:'container',
+            cls: 'build-info',
+            padding: 2,
+            html:"This app was created by the Rally Technical Services Team."
+        });
+        
+        if ( APP_BUILD_DATE ) {
+            this.addDocked({
+                xtype:'container',
+                cls: 'build-info',
+                padding: 2,
+                html:'Build date/time: ' + APP_BUILD_DATE
+            });
+        }
+    }
+});
+
+/*
+ */
+Ext.define('Rally.technicalservices.Logger',{
+    constructor: function(config){
+        Ext.apply(this,config);
+    },
+    log: function(args){
+        var timestamp = "[ " + Ext.util.Format.date(new Date(), "Y-m-d H:i:s.u") + " ]";
+        //var output_args = arguments;
+        //output_args.unshift( [ "[ " + timestamp + " ]" ] );
+        //output_args = Ext.Array.push(output_args,arguments);
+        
+        var output_args = [];
+        output_args = Ext.Array.push(output_args,[timestamp]);
+        output_args = Ext.Array.push(output_args, Ext.Array.slice(arguments,0));
+
+        window.console && console.log.apply(console,output_args);
+    }
+
+});
+
+Ext.define('Rally.technicalservices.util.Utilities', {
+    singleton: true,
+    hashToArray: function(hash) {
+        var result = [];
+        for ( var key in hash ) {
+            result.push(hash[key]);
+        }
+        return result;
+    },
+    daysBetweenWithFraction: function(begin_date_js,end_date_js,skip_weekends){
+
+        var days_between = Rally.technicalservices.util.Utilities.daysBetween(begin_date_js, end_date_js, skip_weekends);
+
+        if ( typeof(begin_date_js) == "string" ) {
+           begin_date_js = Rally.util.DateTime.fromIsoString(begin_date_js);
+        }
+        if ( typeof(end_date_js) == "string" ) {
+            end_date_js = Rally.util.DateTime.fromIsoString(end_date_js);
+        }
+
+        var end_date_beginning_of_day = new Date(Ext.clone(end_date_js).setHours(0,0,0,0)),
+            begin_date_beginning_of_day = new Date(Ext.clone(begin_date_js).setHours(0,0,0,0)),
+            add_minutes = 0,
+            delta_minutes = 0;
+
+        if (this.isWeekday(end_date_js)) {
+            add_minutes = Rally.util.DateTime.getDifference(end_date_js, end_date_beginning_of_day, 'minute');
+        }
+        if (this.isWeekday(begin_date_js)) {
+            delta_minutes = Rally.util.DateTime.getDifference(begin_date_js, begin_date_beginning_of_day, 'minute');
+        }
+        var min = days_between * 1440 + add_minutes - delta_minutes;
+        if (min > 0){
+            min = Math.max(min/1440,0.01);
+        } else {
+            min = 0;
+        }
+        return Number(min.toFixed(2));
+    },
+    daysBetween: function(begin_date_js,end_date_js,skip_weekends){
+
+        if ( typeof(begin_date_js) == "string" ) {
+            begin_date_js = Rally.util.DateTime.fromIsoString(begin_date_js);
+        }
+        if ( typeof(end_date_js) == "string" ) {
+            end_date_js = Rally.util.DateTime.fromIsoString(end_date_js);
+        }
+        
+        var dDate1 = Ext.clone(begin_date_js).setHours(0,0,0,0);
+        var dDate2 = Ext.clone(end_date_js).setHours(0,0,0,0);
+        
+        if ( dDate1 == dDate2 ) { return 1; }
+        if (typeof dDate1 === "number") { dDate1 = new Date(dDate1); }
+        if (typeof dDate2 === "number") { dDate2 = new Date(dDate2); }
+            
+        if ( !skip_weekends ) {
+            return Math.abs( Rally.util.DateTime.getDifference(dDate1,dDate2,'day') );
+        } else {
+            // shift to the following Monday
+            if (!this.isWeekday(dDate1)) {
+                dDate1 = this.shiftDateToMonday(dDate1);
+            }
+            if (!this.isWeekday(dDate2)) {
+                dDate2 = this.shiftDateToMonday(dDate2);
+            }
+
+
+            // from the sOverflow
+            var iWeeks, iDateDiff, iAdjust = 0;
+            if (dDate2 < dDate1) 
+            { 
+                var x = dDate2;
+                dDate2 = dDate1;
+                dDate1 = x;
+            }
+            var iWeekday1 = dDate1.getDay(); // day of week
+            var iWeekday2 = dDate2.getDay();
+            iWeekday1 = (iWeekday1 == 0) ? 7 : iWeekday1; // change Sunday from 0 to 7
+            iWeekday2 = (iWeekday2 == 0) ? 7 : iWeekday2;
+            if ((iWeekday1 > 5) && (iWeekday2 > 5)) iAdjust = 1; // adjustment if both days on weekend
+            iWeekday1 = (iWeekday1 > 5) ? 5 : iWeekday1; // only count weekdays
+            iWeekday2 = (iWeekday2 > 5) ? 5 : iWeekday2;
+    
+            // calculate differnece in weeks (1000mS * 60sec * 60min * 24hrs * 7 days = 604800000)
+            iWeeks = Math.floor((dDate2.getTime() - dDate1.getTime()) / 604800000)
+    
+            if (iWeekday1 <= iWeekday2) {
+              iDateDiff = (iWeeks * 5) + (iWeekday2 - iWeekday1)
+            } else {
+              iDateDiff = ((iWeeks + 1) * 5) - (iWeekday1 - iWeekday2)
+            }
+    
+            iDateDiff -= iAdjust // take into account both days on weekend
+    
+            if ( iDateDiff < 1 ) { iDateDiff = 0; }
+            console.log(iDateDiff,begin_date_js,end_date_js);
+            return (iDateDiff); 
+        }
+    },
+
+    isWeekday: function(check_date) {
+        var weekday = true;
+        var day = check_date.getDay();
+        
+        if ( day === 0 || day === 6 ) {
+            weekday = false;
+        }
+        return weekday;
+    },
+    shiftDateToMonday: function(check_date) {
+        var day = check_date.getDay();
+        
+        var delta = 0;
+        
+        if ( day === 0 ) {
+            // it's Sunday
+            delta = 1;
+        }
+        if ( day === 6 ) {
+            delta = 2;
+        }
+        
+        var shifted_date = check_date;
+        if ( delta > 0 ) {
+            shifted_date = new Date(check_date.setHours(0));
+            shifted_date = Rally.util.DateTime.add(shifted_date,"day",delta);
+        }
+        return shifted_date;
+    },
+    /*
+     * compress size is the point at which to move to weeks instead of days
+     */
+    arrayOfDaysBetween: function(begin_date_js, end_date_js, skip_weekends, compress_size ) {
+        var the_array = [];
+        if ( typeof(begin_date_js) == "string" ) {
+            begin_date_js = Rally.util.DateTime.fromIsoString(begin_date_js);
+        }
+        if ( typeof(end_date_js) == "string" ) {
+            end_date_js = Rally.util.DateTime.fromIsoString(end_date_js);
+        }
+        if ( begin_date_js > end_date_js ) {
+            var swap_holder = end_date_js;
+            end_date_js = begin_date_js;
+            begin_date_js = swap_holder;
+        }
+                
+        var dDate1 = Ext.clone(begin_date_js).setHours(0,0,0,0);
+        var dDate2 = Ext.clone(end_date_js).setHours(0,0,0,0);
+        
+        var number_of_days = this.daysBetween(begin_date_js,end_date_js,skip_weekends);
+        
+        var add_value = 1;
+        var add_unit = 'day';
+        
+        if ( Ext.isNumber(compress_size) && number_of_days > compress_size ) {
+            add_value = 7;
+        }
+        
+        if ( number_of_days <= 2 ) {
+            add_value = 30;
+            add_unit = 'minute';
+            dDate2 = Ext.clone(end_date_js).setHours(23,59,0,0);
+        }
+       
+        
+        var check_date = new Date(dDate1);
+        
+        while (check_date <= dDate2) {
+            if ( !skip_weekends || this.isWeekday(check_date) || add_value === 7 || add_unit == 'minute' ) {
+                the_array.push(check_date);
+            }
+            check_date = Rally.util.DateTime.add(check_date,add_unit,add_value);
+        }
+        
+        return the_array;
+    }
+    
+});
+Ext.define("release-progress-kpi", {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+    logger: new Rally.technicalservices.Logger(),
+    defaults: { margin: 10 },
+    items: [
+        {xtype:'container',itemId:'selector_box'},
+        {xtype:'container',itemId:'display_box'}
+    ],
+
+    integrationHeaders : {
+        name : "release-progress-kpi"
+    },
+    
+    config: {
+        defaultSettings: {
+            baselinePoints: 150
+        }
+    },
+
+    getSettingsFields: function() {
+        var me = this;
+        me.kanbanProcessField = 'ScheduleState';
+
+        return  [
+            {
+                name: 'baselinePoints',
+                xtype: 'textfield',
+                fieldLabel: 'Baseline Story Points',
+                labelWidth: 125,
+                labelAlign: 'left',
+                minWidth: 50,
+                margin: 10
+            }
+        ];
+
+    },
+
+    launch: function() {
+        var me = this;
+        me._addSelector();
+    },
+      
+    _addSelector: function() {
+        var me = this;
+        var selector_box = this.down('#selector_box');
+        selector_box.removeAll();
+
+        selector_box.add({
+            xtype:'rallyreleasecombobox',
+            fieldLabel: 'Release:',
+            width:500,
+            margin:10,
+            showArrows : false,
+            context : this.getContext(),
+            growToLongestValue : true,
+            defaultToCurrentTimebox : true,
+            listeners: {
+                scope: me,
+                change: function(rcb) {
+                    me.release = rcb;
+                    me._calculateAndDisplayGrid();
+
+                }
+            }
+        });
+        //me._calculateAndDisplayGrid();
+    },
+
+    _calculateAndDisplayGrid: function(){
+        //this.setLoading("Loading...");
+        var me = this;
+        me.setLoading(true);
+        me._calculateGridValues().then({
+            scope: me,
+            success: function(store) {
+                me.setLoading(false);
+                me._displayGrid(store);
+            },
+            failure: function(error_message){
+                me.setLoading(false);
+                alert(error_message);
+            }
+        }).always(function() {
+            me.setLoading(false);
+        });
+    },
+
+    _calculateGridValues: function(){
+        var deferred = Ext.create('Deft.Deferred');
+
+        var me = this;
+       //get all projects on current scope
+       //get selected release for current project and calculate the SP /Schedule
+
+       // Deft.Chain.parallel([
+       //      me._getProjects
+       //  ],me).then({
+
+        Deft.Promise.all(me._getProjects()).then({            
+            scope: me,
+            success: function(records) {
+                me.logger.log('Results:',records);
+                //Loop thro the projects and get selected release data for each project and calculate SP /Schedule
+
+                var promises = [];
+                Ext.Array.each(records, function(record){
+                    promises.push(function(){
+                        return me._getCollection(record); 
+                    });
+                });
+
+                Deft.Chain.sequence(promises).then({
+                        success: function(results){
+                            me.logger.log('_calculateGridValues',results);
+                            //process the results.
+                            var projects = [];
+                                for (var i = 0; records && i < records.length; i++) {
+                                        var project = {
+                                            ProjectName: records[i].get('Name'),
+                                            SPSchedules:results[i][0],
+                                            Features:results[i][1],
+                                            Velocity:results[i][2]
+                                        }
+                                        projects.push(project);
+                                }
+                                me.logger.log('Projects >>',projects);
+                                // create custom store (call function ) combine permissions and results in to one.
+                                // var store = Ext.create('Rally.data.custom.Store', {
+                                //     data: projects,
+                                //     scope: this
+                                // });
+                                // deferred.resolve(store); 
+
+                                var store = Ext.create('Rally.data.custom.Store', {
+                                    data: projects
+                                });
+
+                            deferred.resolve(store);
+                           // deferred.resolve(results);
+                        },
+                        scope:me                   
+                });
+            },
+            failure: function(msg) {
+                Ext.Msg.alert('Problem Loading Timebox data', msg);
+            }
+        });
+        return deferred.promise;        
+
+    },
+
+    _getCollection: function(project){
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        var project_promises = [];
+
+        
+        project_promises.push(function(){
+            return me._getSPSchedules(project); 
+        });
+
+        project_promises.push(function(){
+            return me._getFeatures(project);
+        });
+
+        project_promises.push(function(){
+            return me._getVelocity(project);
+        });
+
+        Deft.Chain.sequence(project_promises).then({
+            success: function(results){
+                me.logger.log('project_promises',results);
+                deferred.resolve(results);
+            },
+            scope:me                   
+        });
+
+        return deferred.promise;
+    },
+
+    // 1) SP / Schedule. 
+    // Measures whether the team has accepted points in accordance with a rate that would be required to finish all planned points by the end of the release. 
+
+    // Calculation:
+    // Story points accepted to date in this release / points required to be accepted by this date to finish total story point scope by end of release. 
+
+    // Example: 
+    // 90 day release. We are on day 45 (half-way mark). Team has 100 points planned for the release. They have accepted 45 points to date. 
+    // 45/90 = .5  (percent of schedule complete)
+    // .5 * 100 = 50 (expected points complete at this time)
+    // 45/50 = 0.9 (ratio of actual to expected)
+
+
+    // 4) Scope
+    // This is slightly different than the others. It is not a ratio, but a percent growth. It requires manual entry of a baseline story points number to understand what the starting scope should be. This is because they may not have the stories paired to the release on day one…if it was automatic, it might break and they would have no way to fix it. 
+
+    // Calculation: 
+    // (Current story points planned to the release - baseline story points) / baseline story points. 
+
+    // Example:
+    // Current points planned to the release = 250. Baseline (manually entered setting) = 150. 
+    // ((250-150) / 150) * 100 = 66.7% Scope Growth. 
+
+
+    _getSPSchedules: function(project){
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        var release_name = me.release.rawValue;
+        var project_obejctID = project.get('ObjectID');
+        filters = [{property:'Project.ObjectID',value: project_obejctID},{property:'Name',value: release_name}];
+
+        filter = Rally.data.wsapi.Filter.and(filters);
+        
+        Ext.create('Rally.data.wsapi.Store', {
+            model: 'Release',
+            fetch: ['ObjectID','Name','PlanEstimate','Accepted'],
+            filters: filter
+        }).load({
+            callback : function(records, operation, successful) {
+                if (successful){
+                    //me.logger.log('Schedule value',records);
+                    var result = {}
+
+                    if(records[0] && records[0].get('PlanEstimate') > 0){
+                        result.schedule_result = records[0].get('Accepted') / ((records[0].get('Accepted') / records[0].get('PlanEstimate')) * 100) ;
+
+                        result.scope = ((records[0].get('PlanEstimate') - me.getSetting('baselinePoints')) / me.getSetting('baselinePoints')) * 100
+                    }
+                    deferred.resolve(result);
+                } else {
+                    me.logger.log("Failed: ", operation);
+                    deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+                }
+            }
+        });
+        return deferred.promise;        
+    },
+
+    // 3) Velocity. 
+    // Measures whether the teams actual velocity (average of last 3 iterations) is sufficient to complete stories planned for remaining iterations. Note: effectively ignore the iteration in progress. 
+
+    // Calculation:
+    // Actual velocity (avg. of last 3 completed iterations) / (Sum of points in remaining iterations in release / number of iterations remaining in release)
+
+    // Example:
+    // 6 iterations in release. Current iteration is middle of iteration #3. Avg. Velocity = 30. Total points in remaining 4 iterations is 120. 
+    // 30 / (120/4) = 1.0
+    // 1.0 indicates that if team maintains velocity, they will complete all stories currently scheduled. 
+
+    _getVelocity: function(project){
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        var release_name = me.release.rawValue;
+        var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
+        var release_end_date = me.release.valueModels[0].get('ReleaseDate');
+        var project_obejctID = project.get('ObjectID');
+        
+        var today = new Date();
+
+        var filters = [{property:'Project.ObjectID',value: project_obejctID},
+                 //   {property:'EndDate', operator: '>', value: today},
+                    {property:'EndDate', operator: '<=', value: release_end_date},
+                    {property:'StartDate', operator: '>=', value:release_start_date }];
+
+        var filter = Rally.data.wsapi.Filter.and(filters);
+        
+        Ext.create('Rally.data.wsapi.Store', {
+            model: 'Iteration',
+            fetch: ['ObjectID','Name','PlanEstimate','StartDate','EndDate'],
+            filters: filter,
+            sorters: [{
+                        property: 'EndDate',
+                        direction: 'DESC'
+                    }]
+        }).load({
+            callback : function(records, operation, successful) {
+                if (successful){
+                    me.logger.log('_getIterations',records);
+                var result = 0;
+                var velocity = 0;
+                var past_velocity_length = 0;
+                var future_velocity_length = 0;
+                var remining_plan_estimate = 0;
+
+                Ext.Array.each(records,function(iteration){
+                    if(iteration.get('EndDate') < today){
+                        velocity += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+                        past_velocity_length += 1;
+                    }else{
+                        remining_plan_estimate += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+                        future_velocity_length += 1;
+                    }
+                });
+
+                var avg_velocity = velocity / past_velocity_length;
+
+                result = avg_velocity > 0 &&  remining_plan_estimate > 0 && future_velocity_length > 0 ? avg_velocity / (remining_plan_estimate/future_velocity_length) : 0;
+                                
+                me.logger.log('_getVelocity', result, velocity , past_velocity_length,avg_velocity,remining_plan_estimate,future_velocity_length)
+
+                deferred.resolve(result);
+                } else {
+                    me.logger.log("Failed: ", operation);
+                    deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+                }
+            }
+        });
+        return deferred.promise;   
+    },
+
+    // _calculateVelocity: function(project){
+    //     var deferred = Ext.create('Deft.Deferred');
+    //     var me = this;
+    //     var iteration_promises = [];
+
+    //     iteration_promises.push(function(){
+    //         return me._getPastIterations(project); 
+    //     });
+
+    //     iteration_promises.push(function(){
+    //         return me._getFutureIterations(project);
+    //     });
+
+    //     Deft.Chain.sequence(iteration_promises).then({
+    //         success: function(results){
+    //             me.logger.log('_calculateVelocity',results);
+    //             var result = 0;
+    //             var velocity = 0;
+    //             var remining_plan_estimate = 0;
+
+    //             Ext.Array.each(results[0],function(iteration){
+    //                 velocity += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+    //             });
+
+    //             Ext.Array.each(results[1],function(iteration){
+    //                 remining_plan_estimate += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+    //             });
+
+    //             var avg_velocity = velocity / results[0].length;
+
+    //             deferred.resolve(result);
+    //         },
+    //         scope:me                   
+    //     });
+
+    //     return deferred.promise;
+    // },
+
+    // _getPastIterations: function(project){
+    //     var deferred = Ext.create('Deft.Deferred');
+    //     var me = this;
+    //     var release_name = me.release.rawValue;
+    //     var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
+    //     var release_end_date = me.release.valueModels[0].get('ReleaseDate');
+    //     var project_obejctID = project.get('ObjectID');
+        
+    //     filters = [{property:'Project.ObjectID',value: project_obejctID},
+    //                 {property:'EndDate', operator: '<=', value: release_end_date},
+    //                 {property:'StartDate', operator: '>=', value:release_start_date }];
+
+    //     filter = Rally.data.wsapi.Filter.and(filters);
+        
+    //     Ext.create('Rally.data.wsapi.Store', {
+    //         model: 'Iteration',
+    //         fetch: ['ObjectID','Name','PlanEstimate','PlannedVelocity'],
+    //         filters: filter,
+    //         sorters: [{
+    //                     property: 'EndDate',
+    //                     direction: 'DESC'
+    //                 }]
+    //         //        ,
+    //         // limit: 3,
+    //         // pageSize: 3
+    //     }).load({
+    //         callback : function(records, operation, successful) {
+    //             if (successful){
+    //                 me.logger.log('_getIterations',records);
+    //                 deferred.resolve(records);
+    //             } else {
+    //                 me.logger.log("Failed: ", operation);
+    //                 deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+    //             }
+    //         }
+    //     });
+    //     return deferred.promise;        
+    // },
+
+    // _getFutureIterations: function(project){
+    //     var deferred = Ext.create('Deft.Deferred');
+    //     var me = this;
+    //     var release_name = me.release.rawValue;
+    //     var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
+    //     var release_end_date = me.release.valueModels[0].get('ReleaseDate');
+    //     var project_obejctID = project.get('ObjectID');
+        
+    //     var today = Ext.Date.format(new Date(), 'Y-m-d');
+
+    //     var filters = [{property:'Project.ObjectID',value: project_obejctID},
+    //                 {property:'EndDate', operator: '>', value: today},
+    //                 {property:'EndDate', operator: '<=', value: release_end_date},
+    //                 {property:'StartDate', operator: '>=', value:release_start_date }];
+
+    //     var filter = Rally.data.wsapi.Filter.and(filters);
+        
+    //     Ext.create('Rally.data.wsapi.Store', {
+    //         model: 'Iteration',
+    //         fetch: ['ObjectID','Name','PlanEstimate'],
+    //         filters: filter,
+    //         sorters: [{
+    //                     property: 'EndDate',
+    //                     direction: 'DESC'
+    //                 }]
+    //     }).load({
+    //         callback : function(records, operation, successful) {
+    //             if (successful){
+    //                 me.logger.log('_getIterations',records);
+    //                 deferred.resolve(records);
+    //             } else {
+    //                 me.logger.log("Failed: ", operation);
+    //                 deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+    //             }
+    //         }
+    //     });
+    //     return deferred.promise;        
+    // },
+
+    // 2) Features.  
+    // Measures whether the team has completed features in accordance with a rate that would be required to finish all planned features by the end of the release. 
+
+    // Calculation:
+    // Number of Features complete (100% by Story Count) to date in this release / feature count required to be complete by this date to finish all features by end of release. For “required to be complete”, always round down. For example: if by today’s date 4.7 features SHOULD be complete, treat that as 4. 
+
+    // Example:
+    // 90 day release. We are on day 45 (half-way mark). Team has 20 features planned for the release. They have finished 5 to date.
+    // 45/90 = .5  (percent of schedule complete)
+    // 0.5 * 20 = 10 (expected features complete at this time)
+    // 5/10 = 0.5 (ratio of actual to expected)
+
+    _getFeatures: function(project){
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        var release_name = me.release.rawValue;
+        var project_obejctID = project.get('ObjectID');
+        filters = [{property:'Project.ObjectID',value: project_obejctID},{property:'Release.Name',value: release_name}];
+
+        var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
+        var release_end_date = me.release.valueModels[0].get('ReleaseDate');
+        var today = new Date();
+
+        var project_obejctID = project.get('ObjectID');
+        
+        var total_release_days = Math.abs( Rally.util.DateTime.getDifference(release_start_date,release_end_date,'day') );
+        var total_days_done = Math.abs( Rally.util.DateTime.getDifference(release_start_date,today,'day') );
+        
+        var per_sch_complete = total_days_done / total_release_days;
+
+        console.log('total_release_days,total_days_done>>',total_release_days,total_days_done);
+
+        filter = Rally.data.wsapi.Filter.and(filters);
+        
+        Ext.create('Rally.data.wsapi.Store', {
+            model: 'PortfolioItem/Feature',
+            fetch: ['ObjectID','Name','PercentDoneByStoryCount'],
+            filters: filter
+        }).load({
+            callback : function(records, operation, successful) {
+                if (successful){
+                    var feature_result = 0;
+                    var total_features = records.length;
+                    var accepted_count = 0;
+                    
+                    Ext.Array.each(records,function(rec){
+                        if(1 == rec.get('PercentDoneByStoryCount')){
+                            accepted_count += 1;
+                        }
+                    });
+
+                    if(total_features > 0 ){
+                        feature_result = accepted_count / (per_sch_complete * total_features);
+                    }
+
+                    deferred.resolve(feature_result);
+
+                } else {
+                    me.logger.log("Failed: ", operation);
+                    deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+                }
+            }
+        });
+        return deferred.promise;        
+    },
+
+    _getProjects:function(){
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        
+        var project_name = this.getContext().get('project').Name;
+
+
+        filters = [
+             {property:'Name',  value: project_name},
+             {property:'Parent.Name',  value: project_name},
+             {property:'Parent.Parent.Name', value: project_name},
+             {property:'Parent.Parent.Parent.Name', value: project_name},
+             {property:'Parent.Parent.Parent.Parent.Name', value: project_name},
+             {property:'Parent.Parent.Parent.Parent.Parent.Name', value: project_name},
+             {property:'Parent.Parent.Parent.Parent.Parent.Parent.Name', value: project_name},
+             {property:'Parent.Parent.Parent.Parent.Parent.Parent.Parent.Name', value: project_name},
+             {property:'Parent.Parent.Parent.Parent.Parent.Parent.Parent.Parent.Name', value: project_name},
+             {property:'Parent.Parent.Parent.Parent.Parent.Parent.Parent.Parent.Parent.Name', value: project_name}
+        ]
+ 
+        filter = Rally.data.wsapi.Filter.or(filters);
+
+
+        // Ext.create('Rally.data.wsapi.TreeStoreBuilder').build({
+        //      models: ['Project'],
+        //      autoLoad: true,
+        //      enableHierarchy: true,
+        //      filters: filter
+        //   }).then({
+        //     success: function(records) {
+        //          deferred.resolve(records);
+        //     }
+        //  });
+
+        
+        Ext.create('Rally.data.wsapi.Store', {
+            model: 'Project',
+            fetch: ['ObjectID','Name'],
+            //enablePostGet: true,
+            filters: filter
+        }).load({
+            callback : function(records, operation, successful) {
+                if (successful){
+                    deferred.resolve(records);
+                } else {
+                    me.logger.log("Failed: ", operation);
+                    deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+                }
+            }
+        });
+
+        return deferred.promise;
+    },
+
+    _fetchWsapiCount: function(model, query_filters){
+        var deferred = Ext.create('Deft.Deferred');
+
+        Ext.create('Rally.data.wsapi.Store',{
+            model: model,
+            fetch: ['ObjectID'],
+            enablePostGet: true,
+            filters: query_filters,
+            limit: 1,
+            pageSize: 1
+        }).load({
+            callback: function(records, operation, success){
+                if (success){
+                    deferred.resolve(operation.resultSet.totalRecords);
+                } else {
+                    deferred.reject(Ext.String.format("Error getting {0} count for {1}: {2}", model, query_filters.toString(), operation.error.errors.join(',')));
+                }
+            }
+        });
+        return deferred;
+    },
+
+    _loadWsapiRecords: function(config){
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        var default_config = {
+            model: 'Defect',
+            fetch: ['ObjectID']
+        };
+        this.logger.log("Starting load:",config.model);
+        Ext.create('Rally.data.wsapi.Store', Ext.Object.merge(default_config,config)).load({
+            callback : function(records, operation, successful) {
+                if (successful){
+                    deferred.resolve(records);
+                } else {
+                    me.logger.log("Failed: ", operation);
+                    deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+                }
+            }
+        });
+        return deferred.promise;
+    },
+
+    _loadAStoreWithAPromise: function(model_name, model_fields){
+        var deferred = Ext.create('Deft.Deferred');
+        var me = this;
+        this.logger.log("Starting load:",model_name,model_fields);
+          
+        Ext.create('Rally.data.wsapi.Store', {
+            model: model_name,
+            fetch: model_fields
+        }).load({
+            callback : function(records, operation, successful) {
+                if (successful){
+                    deferred.resolve(this);
+                } else {
+                    me.logger.log("Failed: ", operation);
+                    deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
+                }
+            }
+        });
+        return deferred.promise;
+    },
+    
+    _displayGrid: function(store){
+        this.down('#display_box').removeAll();
+        this.down('#display_box').add({
+            xtype: 'rallygrid',
+            store: store,
+            showRowActionsColumn: false,            
+            columnCfgs: [
+                {
+                    text: 'PROJECT', 
+                    dataIndex: 'ProjectName',
+                    flex: 2
+                },                
+                {
+                    text: 'SP / Schedules', 
+                    dataIndex: 'SPSchedules',
+                    flex: 2,
+                    renderer: function(SPSchedules){
+                        return Ext.util.Format.number(SPSchedules.schedule_result > 0 ? SPSchedules.schedule_result : 0, "000.00");
+                    }
+                },                
+                {
+                    text: 'Features', 
+                    dataIndex: 'Features',
+                    flex: 2,
+                    renderer: function(Features){
+                        return Ext.util.Format.number(Features > 0 ? Features : 0, "000.00");
+                    }
+                },{
+                    text: 'Velocity', 
+                    dataIndex: 'Velocity',
+                    flex: 2,
+                    renderer: function(Velocity){
+                        return Ext.util.Format.number(Velocity > 0 ? Velocity : 0, "000.00");
+                    }
+                },{
+                    text: 'Scope', 
+                    dataIndex: 'SPSchedules',
+                    flex: 2,
+                    renderer: function(SPSchedules){
+                        return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
+                    }
+                }
+
+
+                ]
+        });
+    },
+    
+    getOptions: function() {
+        return [
+            {
+                text: 'About...',
+                handler: this._launchInfo,
+                scope: this
+            }
+        ];
+    },
+    
+    _launchInfo: function() {
+        if ( this.about_dialog ) { this.about_dialog.destroy(); }
+        this.about_dialog = Ext.create('Rally.technicalservices.InfoLink',{});
+    },
+    
+    isExternal: function(){
+        return typeof(this.getAppId()) == 'undefined';
+    },
+    
+    //onSettingsUpdate:  Override
+    onSettingsUpdate: function (settings){
+        this.logger.log('onSettingsUpdate',settings);
+        // Ext.apply(this, settings);
+        this.launch();
+    }
+});
+
+            
+               Rally.launchApp('release-progress-kpi', {
+                   name: 'release-progress-kpi'
+               });
+        });
+    </script>
+    
+    <style type="text/css">
+
+.app {
+}
+.tsinfolink {
+    position:absolute;
+    right:0px;
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    text-align: center;
+    color: white;
+    background: #C0C0C0;
+    border-style: solid;
+    border-width: 1px;
+    margin-top: 25px;
+    margin-right: 5px;
+    cursor: pointer;
+}
+    </style>
+
+</head>
+<body></body>
+</html>
