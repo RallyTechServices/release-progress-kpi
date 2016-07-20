@@ -12,16 +12,25 @@ Ext.define("release-progress-kpi", {
         name : "release-progress-kpi"
     },
     
+    //grid colors
+    red: '#ff9999',
+    yellow: '#ffffcc',
+    green: '#ccffcc',
+    grey: '#e6e6e6',
+
+
     config: {
         defaultSettings: {
-            baselinePoints: 150
+            baselinePoints: 150,
+            scheduleThreshold: 1,
+            featureThreshold: 1,
+            velocityThreshold: 1
         }
     },
 
     getSettingsFields: function() {
         var me = this;
-        me.kanbanProcessField = 'ScheduleState';
-
+ 
         return  [
             {
                 name: 'baselinePoints',
@@ -31,9 +40,35 @@ Ext.define("release-progress-kpi", {
                 labelAlign: 'left',
                 minWidth: 50,
                 margin: 10
-            }
+            },
+            {
+                name: 'scheduleThreshold',
+                xtype: 'textfield',
+                fieldLabel: 'Schedule Threshold',
+                labelWidth: 125,
+                labelAlign: 'left',
+                minWidth: 50,
+                margin: 10
+            },
+            {
+                name: 'featureThreshold',
+                xtype: 'textfield',
+                fieldLabel: 'Feature Threshold',
+                labelWidth: 125,
+                labelAlign: 'left',
+                minWidth: 50,
+                margin: 10
+            },
+            {
+                name: 'velocityThreshold',
+                xtype: 'textfield',
+                fieldLabel: 'Velocity Threshold',
+                labelWidth: 125,
+                labelAlign: 'left',
+                minWidth: 50,
+                margin: 10
+            }                                    
         ];
-
     },
 
     launch: function() {
@@ -64,11 +99,9 @@ Ext.define("release-progress-kpi", {
                 }
             }
         });
-        //me._calculateAndDisplayGrid();
     },
 
     _calculateAndDisplayGrid: function(){
-        //this.setLoading("Loading...");
         var me = this;
         me.setLoading(true);
         me._calculateGridValues().then({
@@ -220,11 +253,16 @@ Ext.define("release-progress-kpi", {
             callback : function(records, operation, successful) {
                 if (successful){
                     //me.logger.log('Schedule value',records);
-                    var result = {}
+                    var result = {};
 
                     if(records[0] && records[0].get('PlanEstimate') > 0){
-                        result.schedule_result = records[0].get('Accepted') / ((records[0].get('Accepted') / records[0].get('PlanEstimate')) * 100) ;
 
+                        result.total = records[0].get('PlanEstimate');
+                        result.accepted = records[0].get('Accepted');
+                        result.expected = (records[0].get('Accepted') / records[0].get('PlanEstimate')) * 100 ;
+                        result.baseline = me.getSetting('baselinePoints');
+
+                        result.schedule_result = records[0].get('Accepted') / result.expected;
                         result.scope = ((records[0].get('PlanEstimate') - me.getSetting('baselinePoints')) / me.getSetting('baselinePoints')) * 100
                     }
                     deferred.resolve(result);
@@ -277,36 +315,43 @@ Ext.define("release-progress-kpi", {
             callback : function(records, operation, successful) {
                 if (successful){
                     me.logger.log('_getIterations',records);
-                var result = 0;
-                var velocity = 0;
-                var past_velocity_length = 0;
-                var future_velocity_length = 0;
-                var remining_plan_estimate = 0;
+                    var velocity = {};
+                    velocity.result = 0;
+                    var result = 0;
+                    var past_velocity = 0;
+                    var past_velocity_length = 0;
+                    var future_velocity_length = 0;
+                    var remining_plan_estimate = 0;
 
-                Ext.Array.each(records,function(iteration){
-                    if(iteration.get('EndDate') < today){
-                        velocity += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
-                        past_velocity_length += 1;
-                    }else{
-                        remining_plan_estimate += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
-                        future_velocity_length += 1;
-                    }
-                });
+                    Ext.Array.each(records,function(iteration){
+                        if(iteration.get('EndDate') < today){
+                            past_velocity += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+                            past_velocity_length += 1;
+                        }else{
+                            remining_plan_estimate += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+                            future_velocity_length += 1;
+                        }
+                    });
 
-                var avg_velocity = velocity / past_velocity_length;
+                    var avg_velocity = past_velocity / past_velocity_length;
 
-                result = avg_velocity > 0 &&  remining_plan_estimate > 0 && future_velocity_length > 0 ? avg_velocity / (remining_plan_estimate/future_velocity_length) : 0;
-                                
-                me.logger.log('_getVelocity', result, velocity , past_velocity_length,avg_velocity,remining_plan_estimate,future_velocity_length)
+                    velocity.average = avg_velocity;
+                    velocity.remining_scope = remining_plan_estimate;
+                    velocity.remining_sprints = future_velocity_length;
 
-                deferred.resolve(result);
+                    velocity.result = avg_velocity > 0 &&  remining_plan_estimate > 0 && future_velocity_length > 0 ? avg_velocity / (remining_plan_estimate/future_velocity_length) : 0;
+                                    
+                    me.logger.log('_getVelocity', result, velocity , past_velocity_length,avg_velocity,remining_plan_estimate,future_velocity_length)
+
+                    deferred.resolve(velocity);
+
                 } else {
                     me.logger.log("Failed: ", operation);
                     deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
                 }
             }
         });
-        return deferred.promise;   
+        return deferred.promise; 
     },
 
     // _calculateVelocity: function(project){
@@ -466,21 +511,23 @@ Ext.define("release-progress-kpi", {
         }).load({
             callback : function(records, operation, successful) {
                 if (successful){
-                    var feature_result = 0;
-                    var total_features = records.length;
-                    var accepted_count = 0;
+                    var feature = {};
+                    feature.result = 0;
+                    feature.total = records.length;
+                    feature.accepted = 0;
+                    feature.expected = per_sch_complete * feature.total;
                     
                     Ext.Array.each(records,function(rec){
                         if(1 == rec.get('PercentDoneByStoryCount')){
-                            accepted_count += 1;
+                            feature.accepted += 1;
                         }
                     });
 
-                    if(total_features > 0 ){
-                        feature_result = accepted_count / (per_sch_complete * total_features);
+                    if(feature.total > 0 ){
+                        feature.result = feature.accepted / feature.expected;
                     }
 
-                    deferred.resolve(feature_result);
+                    deferred.resolve(feature);
 
                 } else {
                     me.logger.log("Failed: ", operation);
@@ -513,19 +560,7 @@ Ext.define("release-progress-kpi", {
  
         filter = Rally.data.wsapi.Filter.or(filters);
 
-
-        // Ext.create('Rally.data.wsapi.TreeStoreBuilder').build({
-        //      models: ['Project'],
-        //      autoLoad: true,
-        //      enableHierarchy: true,
-        //      filters: filter
-        //   }).then({
-        //     success: function(records) {
-        //          deferred.resolve(records);
-        //     }
-        //  });
-
-        
+       
         Ext.create('Rally.data.wsapi.Store', {
             model: 'Project',
             fetch: ['ObjectID','Name'],
@@ -610,11 +645,14 @@ Ext.define("release-progress-kpi", {
     },
     
     _displayGrid: function(store){
-        this.down('#display_box').removeAll();
-        this.down('#display_box').add({
+        var me = this;
+        me.down('#display_box').removeAll();
+        me.down('#display_box').add({
             xtype: 'rallygrid',
             store: store,
-            showRowActionsColumn: false,            
+            showRowActionsColumn: false,
+            scope:me,    
+            border:true,        
             columnCfgs: [
                 {
                     text: 'PROJECT', 
@@ -624,36 +662,102 @@ Ext.define("release-progress-kpi", {
                 {
                     text: 'SP / Schedules', 
                     dataIndex: 'SPSchedules',
-                    flex: 2,
-                    renderer: function(SPSchedules){
+                    flex: 1,
+                    renderer: function(SPSchedules,metaData){
+                        var color = 'ffffff';
+                        if(SPSchedules.schedule_result < me.getSetting('scheduleThreshold')){
+                            color =  me.red;
+                        }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThreshold')){
+                            color = me.green;
+                        }
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
                         return Ext.util.Format.number(SPSchedules.schedule_result > 0 ? SPSchedules.schedule_result : 0, "000.00");
+          
                     }
+                    
                 },                
                 {
                     text: 'Features', 
                     dataIndex: 'Features',
-                    flex: 2,
-                    renderer: function(Features){
-                        return Ext.util.Format.number(Features > 0 ? Features : 0, "000.00");
+                    flex: 1,
+                    renderer: function(Features,metaData){
+                        var color = 'ffffff';
+                        if(Features && Features.result < me.getSetting('featureThreshold')){
+                            color =  me.red;
+                        }else if (Features && Features.result >= me.getSetting('featureThreshold')){
+                            color = me.green;
+                        }
+
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
+                        return Ext.util.Format.number(Features.result > 0 ? Features.result : 0, "000.00");
                     }
+
                 },{
                     text: 'Velocity', 
                     dataIndex: 'Velocity',
-                    flex: 2,
-                    renderer: function(Velocity){
-                        return Ext.util.Format.number(Velocity > 0 ? Velocity : 0, "000.00");
+                    flex: 1,
+                    renderer: function(Velocity,metaData){
+                        var color = 'ffffff';
+                        if(Velocity && Velocity.result < me.getSetting('velocityThreshold')){
+                            color =  me.red;
+                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThreshold')){
+                            color =  me.green;
+                        }     
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;      
+                        return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
+
                     }
+
                 },{
                     text: 'Scope', 
                     dataIndex: 'SPSchedules',
-                    flex: 2,
+                    flex: 1,
                     renderer: function(SPSchedules){
                         return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
                     }
                 }
 
 
-                ]
+                ],
+                listeners: {
+                    itemclick: function(view, record, item, index, evt) {
+                        var column = view.getPositionByEvent(evt).column;
+                        
+                        if (column > 0 && column < 5) {
+                            var column_index = view.up().columns[column].dataIndex;
+                            var column_title = view.up().columns[column].text;
+                            if('SP / Schedules' == column_title || 'Features' == column_title ){
+                                var column_value = record.get(column_index)
+                                var html = "Total Scope: "+column_value.total +"<br>"+"Accepted: "+column_value.accepted +"<br>"+"Expected: "+Math.round(column_value.expected) +"<br>";
+                            }else if('Velocity' == column_title){
+                                var column_value = record.get(column_index)
+                                var html = "Average Velocity: "+column_value.average +"<br>"+"Remining Scope: "+column_value.remining_scope +"<br>"+"Remining Sprints: "+column_value.remining_sprints +"<br>";
+                            }else if('Scope' == column_title){
+                                var column_value = record.get(column_index)
+                                var html = "Total Scope: "+column_value.total +"<br>"+"Baseline Points: "+column_value.baseline +"<br>";
+                            }else{
+                                var html = "Value:" + record.get(column_index)
+                            }
+
+                            var popover = Ext.create('Rally.ui.popover.Popover',{
+                                                target: Ext.get(evt.target),
+                                                html: html,
+                                                title:column_title,
+                                                bodyStyle: {
+                                                    background: '#ADD8E6',
+                                                    padding: '10px',
+                                                    color: 'black'
+                                                },  
+                                                //height:150,
+                                                width:250
+                                            });
+                            popover.show();
+
+                            console.log("click",column_index,record, record.get(column_index));
+                            
+                        }
+                    }
+                }
         });
     },
     
