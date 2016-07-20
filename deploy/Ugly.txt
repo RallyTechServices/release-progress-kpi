@@ -3,10 +3,10 @@
 <head>
     <title>release-progress-kpi</title>
     <!--  (c) 2015,2016 CA Technologies.  All Rights Reserved. -->
-    <!--  Build Date: Thu Jul 14 2016 10:33:28 GMT-0400 (EDT) -->
+    <!--  Build Date: Wed Jul 20 2016 10:24:49 GMT-0400 (EDT) -->
     
     <script type="text/javascript">
-        var APP_BUILD_DATE = "Thu Jul 14 2016 10:33:28 GMT-0400 (EDT)";
+        var APP_BUILD_DATE = "Wed Jul 20 2016 10:24:49 GMT-0400 (EDT)";
         var CHECKSUM = [%= checksum %];
     </script>
     
