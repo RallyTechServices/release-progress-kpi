@@ -108,7 +108,9 @@ Ext.define("release-progress-kpi", {
             scope: me,
             success: function(store) {
                 me.setLoading(false);
-                me._displayGrid(store);
+                me._makeStoreAndShowGrid(store);
+
+                //me._displayGrid(store);
             },
             failure: function(error_message){
                 me.setLoading(false);
@@ -134,51 +136,126 @@ Ext.define("release-progress-kpi", {
             scope: me,
             success: function(records) {
                 me.logger.log('Results:',records);
-                //Loop thro the projects and get selected release data for each project and calculate SP /Schedule
 
-                var promises = [];
-                Ext.Array.each(records, function(record){
-                    promises.push(function(){
-                        return me._getCollection(record); 
-                    });
+
+                me._getTreeArray(records).then({
+                    scope: me,
+                    success:function(results){
+
+
+                        // Ext.Object.each(results, function(oid,item){
+                        //     item.set('SPSchedules',1);
+                        //     item.set('Features',2);
+                        //     item.set('Velocity',3);
+                        // });
+
+                        var promises = [];
+                        Ext.Array.each(records, function(record){
+                            promises.push(function(){
+                                return me._getCollection(record); 
+                            });
+                        });
+
+                        Deft.Chain.sequence(promises).then({
+                                success: function(caclulatedResults){
+                                    //process the results.
+
+
+                                    for (var i = 0; records && i < records.length; i++) {
+
+                                            results[records[i].get('ObjectID')].set('SPSchedules',caclulatedResults[i][0]);
+                                            results[records[i].get('ObjectID')].set('Features',caclulatedResults[i][1]);
+                                            results[records[i].get('ObjectID')].set('Velocity',caclulatedResults[i][2]);        
+
+                                    }
+
+
+                                    console.log('treeHash',results);
+
+                                    var root_items = me.constructRootItems(results);
+
+                                    console.log('root_items',root_items);
+
+                                    var calculated_items = me._doColumnCalculations(root_items);
+
+                                    var root_items_hash = me.convertModelsToHashes(calculated_items);
+
+                                    console.log('root_items_hash',root_items_hash);
+                                    
+                                    deferred.resolve(root_items_hash);
+
+
+                                },
+                                scope:me                   
+                        });
+
+                    },
+                    failure:function(error_msg){ 
+                        console.log('Failed');
+                    }
                 });
 
-                Deft.Chain.sequence(promises).then({
-                        success: function(results){
-                            me.logger.log('_calculateGridValues',results);
-                            //process the results.
-                            var projects = [];
-                                for (var i = 0; records && i < records.length; i++) {
-                                        var project = {
-                                            ProjectName: records[i].get('Name'),
-                                            SPSchedules:results[i][0],
-                                            Features:results[i][1],
-                                            Velocity:results[i][2]
-                                        }
-                                        projects.push(project);
-                                }
-                                me.logger.log('Projects >>',projects);
-                                // create custom store (call function ) combine permissions and results in to one.
-                                // var store = Ext.create('Rally.data.custom.Store', {
-                                //     data: projects,
-                                //     scope: this
-                                // });
-                                // deferred.resolve(store); 
 
-                                var store = Ext.create('Rally.data.custom.Store', {
-                                    data: projects
-                                });
 
-                            deferred.resolve(store);
-                           // deferred.resolve(results);
-                        },
-                        scope:me                   
-                });
+
+
+
+
+
+                
+
+
+
+
+
+                // //Loop thro the projects and get selected release data for each project and calculate SP /Schedule
+
+                // var promises = [];
+                // Ext.Array.each(records, function(record){
+                //     promises.push(function(){
+                //         return me._getCollection(record); 
+                //     });
+                // });
+
+                // Deft.Chain.sequence(promises).then({
+                //         success: function(results){
+                //             me.logger.log('_calculateGridValues',results);
+                //             //process the results.
+                //             var projects = [];
+                //                 for (var i = 0; records && i < records.length; i++) {
+                //                         var project = {
+                //                             ProjectName: records[i].get('Name'),
+                //                             SPSchedules:results[i][0],
+                //                             Features:results[i][1],
+                //                             Velocity:results[i][2]
+                //                         }
+                //                         projects.push(project);
+                //                 }
+                //                 me.logger.log('Projects >>',projects);
+                //                 // create custom store (call function ) combine permissions and results in to one.
+                //                 // var store = Ext.create('Rally.data.custom.Store', {
+                //                 //     data: projects,
+                //                 //     scope: this
+                //                 // });
+                //                 // deferred.resolve(store); 
+
+                //                 var store = Ext.create('Rally.data.custom.Store', {
+                //                     data: projects
+                //                 });
+
+                //             deferred.resolve(store);
+                //            // deferred.resolve(results);
+                //         },
+                //         scope:me                   
+                // });
+
+
             },
             failure: function(msg) {
                 Ext.Msg.alert('Problem Loading Timebox data', msg);
             }
         });
+
         return deferred.promise;        
 
     },
@@ -563,7 +640,7 @@ Ext.define("release-progress-kpi", {
        
         Ext.create('Rally.data.wsapi.Store', {
             model: 'Project',
-            fetch: ['ObjectID','Name'],
+            fetch: ['ObjectID','Name','Parent','Children'],
             //enablePostGet: true,
             filters: filter
         }).load({
@@ -601,6 +678,232 @@ Ext.define("release-progress-kpi", {
         });
         return deferred;
     },
+
+    /* Tree Grid code */
+
+    _getTreeArray:function(target_items) {
+        var deferred = Ext.create('Deft.Deferred');
+
+        var fetched_items_by_oid = {};
+        _.each(target_items, function(rec){
+            fetched_items_by_oid[rec.get('ObjectID')] = rec;
+        });
+
+        var promises = [];
+        
+        promises.push(this._fetchChildItems(target_items,fetched_items_by_oid));
+
+        Deft.Promise.all(promises).then({
+            scope: this,
+            success: function(all_unordered_items){
+                var flattened_array = Ext.Array.flatten(all_unordered_items);
+                
+                var all_unordered_items_hash = {};
+                if ( flattened_array.length > 0 ) {
+                    all_unordered_items_hash = flattened_array[0];
+                }
+                deferred.resolve(all_unordered_items_hash);
+            },
+            failure: function(error_msg) { deferred.reject(error_msg); }
+        });
+
+        return deferred;
+
+    },
+
+    /**
+     * Given an array of models, turn them into hashes
+     */
+    convertModelsToHashes: function(model_array) {
+        console.log('convertModelsToHashes input>>',model_array);
+        var hash_array = [];
+        Ext.Array.each(model_array,function(model){
+            if (this.isModel(model)) {
+                var model_as_hash = model.data;
+                model_as_hash.expanded = false;
+                model_as_hash.leaf = false;
+                
+                // children & parent are fields that are not a 
+                // part of the model def'n so getData doesn't provide them
+                if ( model.get('children') ) {
+                    model_as_hash.children = this.convertModelsToHashes(model.get('children'));
+                }
+                if ( model.get('parent') ) {
+                    if ( this.isModel(model.get('parent') ) ) {
+                        model_as_hash.parent = model.get('parent').getData();
+                    } else {
+                        model_as_hash.parent = model.get('parent');
+                    }
+                }
+
+                if (!model_as_hash.children || model_as_hash.children.length === 0 ) {
+                    model_as_hash.leaf = true;
+                }
+                
+                hash_array.push(model_as_hash);
+            } else {
+                hash_array.push(model);
+            }
+        },this);
+        console.log('convertModelsToHashes output>>',hash_array);
+        return hash_array;
+    },
+    isModel: function(model){
+        return model && ( model instanceof Ext.data.Model );
+    },
+
+
+    constructRootItems:function(item_hash) {
+        console.log('constructRootItems output>>',item_hash);        
+        var root_array = [];
+        Ext.Object.each(item_hash, function(oid,item){
+            if ( !item.get('children') ) { item.set('children',[]); }
+            var direct_parent = item.get('parent');
+            if (!direct_parent && !Ext.Array.contains(root_array,item)) {
+                root_array.push(item);
+            } else {
+                
+                var parent_oid =  direct_parent.ObjectID || direct_parent.get('ObjectID');
+                if (!item_hash[parent_oid]) {
+                    this.logger.log("Saved parent missing: ", parent_oid);
+                    if ( !Ext.Array.contains(root_array,item) ) {
+                        root_array.push(item);
+                    }
+                } else {
+                    var parent = item_hash[parent_oid];
+                    if ( !parent.get('children') ) { parent.set('children',[]); }
+                    var kids = parent.get('children');
+                    kids.push(item);
+                    parent.set('children',kids);
+                }
+            }
+        },this);
+        console.log('constructRootItems output>>',root_array);        
+
+        return root_array;
+    },
+
+    _fetchChildItems: function(parent_items,fetched_items, deferred){
+        this.logger.log('_fetchChildItems',parent_items.length);
+        if ( !deferred ) {
+            deferred = Ext.create('Deft.Deferred');
+        }
+        
+       
+        var promises = [];
+        
+        Ext.Object.each(parent_items,function(oid,parent){
+            var type = parent.get('_type');
+            var children_fields = ['Children']
+            
+            if ( children_fields ) {
+                Ext.Array.each(children_fields,function(children_field) {
+                    promises.push(this._fetchCollection(parent,children_field));
+                },this);
+            }
+        },this);
+        
+           
+        if (promises.length > 0) {
+            Deft.Promise.all(promises).then({
+                scope: this,
+                success: function(results) {
+                    var children = Ext.Array.flatten(results);
+                    Ext.Array.each(children,function(child){
+                        if ( fetched_items[child.get('ObjectID') ] ) {
+                            var parent = this._getParentFrom(child);
+                            fetched_items[child.get('ObjectID')] = child;
+                        }
+                    },this);
+                    this._fetchChildItems(children,fetched_items,deferred);
+                },
+                failure: function(error_msg){ deferred.reject(error_msg); }
+            });
+        } else {
+            this.logger.log("resolving _fetchChildItems");
+            deferred.resolve(fetched_items);
+        }
+        return deferred.promise;
+    },
+
+ _getParentFrom:function(child){
+            var parent = child.get("Parent");
+            child.set('parent', parent);
+            return parent;
+ },
+
+    _fetchCollection: function(parent,children_field){
+        var deferred = Ext.create('Deft.Deferred');
+        this.logger.log("_fetchCollection",children_field);
+        
+        var fields_to_fetch = ['ObjectID','_type','Name','Parent','Children'];
+        
+        if ( parent.get(children_field)){
+            parent.getCollection(children_field,{
+                autoLoad: true,
+                fetch: fields_to_fetch,
+                listeners: {
+                    scope: this,
+                    load: function(store,records,success){
+                        if ( success ) {
+                            deferred.resolve(records);
+                        } else {
+                            deferred.reject("Problem fetching collection ", children_field);
+                        }
+                    }
+                }
+            });
+        } else {
+            deferred.resolve([]);
+        }
+        return deferred.promise;
+    },
+  
+
+    _doColumnCalculations:function(ordered_items){
+        var me = this;
+        var calculated_items = ordered_items;
+        Ext.Array.each(this.columns,function(column){
+            if ( column.calculator && column.dataIndex ) {
+                calculated_items = me.rollup({
+                    root_items: ordered_items,
+                    field_name: column.dataIndex,
+                    leaves_only: column.leaves_only,
+                    calculator: column.calculator
+                });
+            }
+        });
+        return calculated_items;
+    },
+
+    rollup: function(config){
+        Ext.Array.each(config.root_items,function(root_item){
+            this._setValueFromChildren(root_item,config.field_name,config.calculator,config.leaves_only);
+        },this);
+        return config.root_items;
+    },
+
+    _setValueFromChildren:function(parent_item,field_name,calculator,leaves_only){
+        var parent_value = parent_item.get(field_name) || 0;
+        if ( calculator ) {
+            parent_value = this._calculate(parent_item,calculator);
+        }
+        var children = parent_item.get('children') || [];
+        
+        if ( leaves_only && children.length > 0 ) { parent_value = 0; }
+
+        Ext.Array.each(children,function(child_item) {
+            this._setValueFromChildren(child_item,field_name,calculator,leaves_only);
+            var child_value = child_item.get(field_name) || 0;
+            if ( calculator && child_value == 0 ) {
+                child_value = this._calculate(child_item,calculator);
+            }
+            parent_value += child_value;
+        },this);
+        parent_item.set(field_name,parent_value);
+        return;
+    },
+/* End tree grid code*/
 
     _loadWsapiRecords: function(config){
         var deferred = Ext.create('Deft.Deferred');
@@ -761,6 +1064,144 @@ Ext.define("release-progress-kpi", {
         });
     },
     
+
+    _makeStoreAndShowGrid: function(ordered_items){
+        var me = this;
+        var display = me.down('#display_box');
+        display.removeAll();
+
+        var store = Ext.create('Ext.data.TreeStore', {
+            model: 'TSModel',
+            root: {
+                expanded: true,
+                children: ordered_items
+            }
+        });
+        
+        this.add({
+            xtype:'treepanel',
+            store: store,
+            cls: 'rally-grid',
+            columns: [
+                { xtype:'treecolumn', dataIndex:'Name', text:'PROJECT', flex: 2, menuDisabled: true },
+                {
+                    text: 'SP / Schedules', 
+                    dataIndex: 'SPSchedules',
+                    flex: 1,
+                    renderer: function(SPSchedules,metaData){
+                        var color = 'ffffff';
+                        if(SPSchedules.schedule_result < me.getSetting('scheduleThreshold')){
+                            color =  me.red;
+                        }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThreshold')){
+                            color = me.green;
+                        }
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
+                        return Ext.util.Format.number(SPSchedules.schedule_result > 0 ? SPSchedules.schedule_result : 0, "000.00");
+          
+                    }
+                    
+                },                
+                {
+                    text: 'Features', 
+                    dataIndex: 'Features',
+                    flex: 1,
+                    renderer: function(Features,metaData){
+                        var color = 'ffffff';
+                        if(Features && Features.result < me.getSetting('featureThreshold')){
+                            color =  me.red;
+                        }else if (Features && Features.result >= me.getSetting('featureThreshold')){
+                            color = me.green;
+                        }
+
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
+                        return Ext.util.Format.number(Features.result > 0 ? Features.result : 0, "000.00");
+                    }
+
+                },{
+                    text: 'Velocity', 
+                    dataIndex: 'Velocity',
+                    flex: 1,
+                    renderer: function(Velocity,metaData){
+                        var color = 'ffffff';
+                        if(Velocity && Velocity.result < me.getSetting('velocityThreshold')){
+                            color =  me.red;
+                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThreshold')){
+                            color =  me.green;
+                        }     
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;      
+                        return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
+
+                    }
+
+                },{
+                    text: 'Scope', 
+                    dataIndex: 'SPSchedules',
+                    flex: 1,
+                    renderer: function(SPSchedules){
+                        return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
+                    }
+                }
+            ],
+            listeners: {
+                itemclick: function(view, record, item, index, evt) {
+                    var column = view.getPositionByEvent(evt).column;
+                    
+                    if (column > 0 && column < 5) {
+                        var column_index = view.up().columns[column].dataIndex;
+                        var column_title = view.up().columns[column].text;
+                        if('SP / Schedules' == column_title || 'Features' == column_title ){
+                            var column_value = record.get(column_index)
+                            var html = "Total Scope: "+column_value.total +"<br>"+"Accepted: "+column_value.accepted +"<br>"+"Expected: "+Math.round(column_value.expected) +"<br>";
+                        }else if('Velocity' == column_title){
+                            var column_value = record.get(column_index)
+                            var html = "Average Velocity: "+column_value.average +"<br>"+"Remining Scope: "+column_value.remining_scope +"<br>"+"Remining Sprints: "+column_value.remining_sprints +"<br>";
+                        }else if('Scope' == column_title){
+                            var column_value = record.get(column_index)
+                            var html = "Total Scope: "+column_value.total +"<br>"+"Baseline Points: "+column_value.baseline +"<br>";
+                        }else{
+                            var html = "Value:" + record.get(column_index)
+                        }
+
+                        var popover = Ext.create('Rally.ui.popover.Popover',{
+                                            target: Ext.get(evt.target),
+                                            html: html,
+                                            title:column_title,
+                                            bodyStyle: {
+                                                background: '#ADD8E6',
+                                                padding: '10px',
+                                                color: 'black'
+                                            },  
+                                            //height:150,
+                                            width:250
+                                        });
+                        popover.show();
+
+                        console.log("click",column_index,record, record.get(column_index));
+                        
+                    }
+                }
+            },
+            
+            rootVisible: false
+        });
+
+    },
+
+    _magicRenderer: function(field,value,meta_data,record){
+        var field_name = field.name || field.get('name');
+        var record_type = record.get('_type');
+        var model = this.models[record_type];
+        // will fail fi field is not on the record
+        // (e.g., we pick accepted date, by are also showing features
+        try {
+            var template = Rally.ui.renderer.RendererFactory.getRenderTemplate(model.getField(field_name)) || "";
+            return template.apply(record.data);
+        } catch(e) {
+            return ".";
+        }
+    },
+
+
     getOptions: function() {
         return [
             {
