@@ -1,3 +1,5 @@
+//TODO: calculate the values at render so that we can show values for parents and child. 
+
 Ext.define("release-progress-kpi", {
     extend: 'Rally.app.App',
     componentCls: 'app',
@@ -14,17 +16,20 @@ Ext.define("release-progress-kpi", {
     
     //grid colors
     red: '#ff9999',
-    yellow: '#ffffcc',
-    green: '#ccffcc',
+    yellow: 'lightyellow',//'#ffffcc',
+    green: 'lightgreen',//'#ccffcc',
     grey: '#e6e6e6',
 
 
     config: {
         defaultSettings: {
-            baselinePoints: 150,
-            scheduleThreshold: 1,
-            featureThreshold: 1,
-            velocityThreshold: 1
+            baselinePointsFiled: 'c_BaseLinePoints',
+            scheduleThresholdLow: 0.8,
+            featureThresholdLow: 0.8,
+            velocityThresholdLow: 0.8,
+            scheduleThresholdHigh: 1.2,
+            featureThresholdHigh: 1.2,
+            velocityThresholdHigh: 1.2            
         }
     },
 
@@ -33,46 +38,74 @@ Ext.define("release-progress-kpi", {
  
         return  [
             {
-                name: 'baselinePoints',
+                name: 'baselinePointsFiled',
+                xtype: 'rallyfieldcombobox',
+                model: 'Release',
+                labelWidth: 125,
+                labelAlign: 'left',
+                minWidth: 50,
+                margin: 10                
+            },
+            {
+                name: 'scheduleThresholdLow',
                 xtype: 'textfield',
-                fieldLabel: 'Baseline Story Points',
+                fieldLabel: 'Schedule Threshold Low',
                 labelWidth: 125,
                 labelAlign: 'left',
                 minWidth: 50,
                 margin: 10
             },
             {
-                name: 'scheduleThreshold',
+                name: 'scheduleThresholdHigh',
                 xtype: 'textfield',
-                fieldLabel: 'Schedule Threshold',
+                fieldLabel: 'Schedule Threshold High',
+                labelWidth: 125,
+                labelAlign: 'left',
+                minWidth: 50,
+                margin: 10
+            },            
+            {
+                name: 'featureThresholdLow',
+                xtype: 'textfield',
+                fieldLabel: 'Feature Threshold Low',
+                labelWidth: 125,
+                labelAlign: 'left',
+                minWidth: 50,
+                margin: 10
+            },            
+            {
+                name: 'featureThresholdHigh',
+                xtype: 'textfield',
+                fieldLabel: 'Feature Threshold High',
                 labelWidth: 125,
                 labelAlign: 'left',
                 minWidth: 50,
                 margin: 10
             },
             {
-                name: 'featureThreshold',
+                name: 'velocityThresholdLow',
                 xtype: 'textfield',
-                fieldLabel: 'Feature Threshold',
+                fieldLabel: 'Velocity Threshold Low',
                 labelWidth: 125,
                 labelAlign: 'left',
                 minWidth: 50,
                 margin: 10
             },
             {
-                name: 'velocityThreshold',
+                name: 'velocityThresholdHigh',
                 xtype: 'textfield',
-                fieldLabel: 'Velocity Threshold',
+                fieldLabel: 'Velocity Threshold High',
                 labelWidth: 125,
                 labelAlign: 'left',
                 minWidth: 50,
                 margin: 10
-            }                                    
+            }                                                  
         ];
     },
 
     launch: function() {
         var me = this;
+        me.columns = me._getColumns();
         me._addSelector();
     },
       
@@ -196,18 +229,6 @@ Ext.define("release-progress-kpi", {
                 });
 
 
-
-
-
-
-
-
-                
-
-
-
-
-
                 // //Loop thro the projects and get selected release data for each project and calculate SP /Schedule
 
                 // var promises = [];
@@ -318,13 +339,15 @@ Ext.define("release-progress-kpi", {
         var me = this;
         var release_name = me.release.rawValue;
         var project_obejctID = project.get('ObjectID');
+        var baselinePointsFiled = me.getSetting('baselinePointsFiled');
+
         filters = [{property:'Project.ObjectID',value: project_obejctID},{property:'Name',value: release_name}];
 
         filter = Rally.data.wsapi.Filter.and(filters);
         
         Ext.create('Rally.data.wsapi.Store', {
             model: 'Release',
-            fetch: ['ObjectID','Name','PlanEstimate','Accepted'],
+            fetch: ['ObjectID','Name','PlanEstimate','Accepted',baselinePointsFiled],
             filters: filter
         }).load({
             callback : function(records, operation, successful) {
@@ -332,15 +355,16 @@ Ext.define("release-progress-kpi", {
                     //me.logger.log('Schedule value',records);
                     var result = {};
 
+
                     if(records[0] && records[0].get('PlanEstimate') > 0){
 
                         result.total = records[0].get('PlanEstimate');
                         result.accepted = records[0].get('Accepted');
                         result.expected = (records[0].get('Accepted') / records[0].get('PlanEstimate')) * 100 ;
-                        result.baseline = me.getSetting('baselinePoints');
+                        result.baseline = records[0].get(baselinePointsFiled);
 
                         result.schedule_result = records[0].get('Accepted') / result.expected;
-                        result.scope = ((records[0].get('PlanEstimate') - me.getSetting('baselinePoints')) / me.getSetting('baselinePoints')) * 100
+                        result.scope = result.baseline > 0 ? ((records[0].get('PlanEstimate') - result.baseline) / result.baseline) * 100 :0;
                     }
                     deferred.resolve(result);
                 } else {
@@ -884,25 +908,31 @@ Ext.define("release-progress-kpi", {
     },
 
     _setValueFromChildren:function(parent_item,field_name,calculator,leaves_only){
-        var parent_value = parent_item.get(field_name) || 0;
-        if ( calculator ) {
-            parent_value = this._calculate(parent_item,calculator);
-        }
+        var me = this;
+        var parent_value = parent_item.get(field_name) || {};
         var children = parent_item.get('children') || [];
         
-        if ( leaves_only && children.length > 0 ) { parent_value = 0; }
+        //if ( leaves_only && children.length > 0 ) { parent_value = {}; }
 
         Ext.Array.each(children,function(child_item) {
             this._setValueFromChildren(child_item,field_name,calculator,leaves_only);
-            var child_value = child_item.get(field_name) || 0;
-            if ( calculator && child_value == 0 ) {
-                child_value = this._calculate(child_item,calculator);
-            }
-            parent_value += child_value;
+            var child_value = child_item.get(field_name) || {};
+            parent_value =  this._addValues(parent_value,child_value);
         },this);
+        console.log('field_name,parent_value',field_name,parent_value);
         parent_item.set(field_name,parent_value);
         return;
     },
+
+    _addValues:function(parent_value,child_value){
+        if(Object.keys(child_value).length === 0) return parent_value;
+        Ext.Object.each(parent_value,function(key,value){ 
+            parent_value[key] += child_value[key]
+        });
+        return parent_value;
+    },
+
+
 /* End tree grid code*/
 
     _loadWsapiRecords: function(config){
@@ -947,124 +977,6 @@ Ext.define("release-progress-kpi", {
         return deferred.promise;
     },
     
-    _displayGrid: function(store){
-        var me = this;
-        me.down('#display_box').removeAll();
-        me.down('#display_box').add({
-            xtype: 'rallygrid',
-            store: store,
-            showRowActionsColumn: false,
-            scope:me,    
-            border:true,        
-            columnCfgs: [
-                {
-                    text: 'PROJECT', 
-                    dataIndex: 'ProjectName',
-                    flex: 2
-                },                
-                {
-                    text: 'SP / Schedules', 
-                    dataIndex: 'SPSchedules',
-                    flex: 1,
-                    renderer: function(SPSchedules,metaData){
-                        var color = 'ffffff';
-                        if(SPSchedules.schedule_result < me.getSetting('scheduleThreshold')){
-                            color =  me.red;
-                        }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThreshold')){
-                            color = me.green;
-                        }
-                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
-                        return Ext.util.Format.number(SPSchedules.schedule_result > 0 ? SPSchedules.schedule_result : 0, "000.00");
-          
-                    }
-                    
-                },                
-                {
-                    text: 'Features', 
-                    dataIndex: 'Features',
-                    flex: 1,
-                    renderer: function(Features,metaData){
-                        var color = 'ffffff';
-                        if(Features && Features.result < me.getSetting('featureThreshold')){
-                            color =  me.red;
-                        }else if (Features && Features.result >= me.getSetting('featureThreshold')){
-                            color = me.green;
-                        }
-
-                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
-                        return Ext.util.Format.number(Features.result > 0 ? Features.result : 0, "000.00");
-                    }
-
-                },{
-                    text: 'Velocity', 
-                    dataIndex: 'Velocity',
-                    flex: 1,
-                    renderer: function(Velocity,metaData){
-                        var color = 'ffffff';
-                        if(Velocity && Velocity.result < me.getSetting('velocityThreshold')){
-                            color =  me.red;
-                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThreshold')){
-                            color =  me.green;
-                        }     
-                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;      
-                        return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
-
-                    }
-
-                },{
-                    text: 'Scope', 
-                    dataIndex: 'SPSchedules',
-                    flex: 1,
-                    renderer: function(SPSchedules){
-                        return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
-                    }
-                }
-
-
-                ],
-                listeners: {
-                    itemclick: function(view, record, item, index, evt) {
-                        var column = view.getPositionByEvent(evt).column;
-                        
-                        if (column > 0 && column < 5) {
-                            var column_index = view.up().columns[column].dataIndex;
-                            var column_title = view.up().columns[column].text;
-                            if('SP / Schedules' == column_title || 'Features' == column_title ){
-                                var column_value = record.get(column_index)
-                                var html = "Total Scope: "+column_value.total +"<br>"+"Accepted: "+column_value.accepted +"<br>"+"Expected: "+Math.round(column_value.expected) +"<br>";
-                            }else if('Velocity' == column_title){
-                                var column_value = record.get(column_index)
-                                var html = "Average Velocity: "+column_value.average +"<br>"+"Remining Scope: "+column_value.remining_scope +"<br>"+"Remining Sprints: "+column_value.remining_sprints +"<br>";
-                            }else if('Scope' == column_title){
-                                var column_value = record.get(column_index)
-                                var html = "Total Scope: "+column_value.total +"<br>"+"Baseline Points: "+column_value.baseline +"<br>";
-                            }else{
-                                var html = "Value:" + record.get(column_index)
-                            }
-
-                            var popover = Ext.create('Rally.ui.popover.Popover',{
-                                                target: Ext.get(evt.target),
-                                                html: html,
-                                                title:column_title,
-                                                bodyStyle: {
-                                                    background: '#ADD8E6',
-                                                    padding: '10px',
-                                                    color: 'black'
-                                                },  
-                                                //height:150,
-                                                width:250
-                                            });
-                            popover.show();
-
-                            console.log("click",column_index,record, record.get(column_index));
-                            
-                        }
-                    }
-                }
-        });
-    },
-    
-
     _makeStoreAndShowGrid: function(ordered_items){
         var me = this;
         var display = me.down('#display_box');
@@ -1078,22 +990,27 @@ Ext.define("release-progress-kpi", {
             }
         });
         
-        this.add({
+        display.add({
             xtype:'treepanel',
             store: store,
+            itemId: 'projectTreeGrid',
             cls: 'rally-grid',
             columns: [
-                { xtype:'treecolumn', dataIndex:'Name', text:'PROJECT', flex: 2, menuDisabled: true },
+                { xtype:'treecolumn', dataIndex:'Name', text:'PROJECT', flex: 2, menuDisabled: true},
                 {
                     text: 'SP / Schedules', 
                     dataIndex: 'SPSchedules',
                     flex: 1,
+                    // calculator: true,
+                    // leaves_only: true,
                     renderer: function(SPSchedules,metaData){
                         var color = 'ffffff';
-                        if(SPSchedules.schedule_result < me.getSetting('scheduleThreshold')){
+                        if(SPSchedules.schedule_result < me.getSetting('scheduleThresholdLow')){
                             color =  me.red;
-                        }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThreshold')){
+                        }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThresholdHigh')){
                             color = me.green;
+                        }else {
+                            color = me.yellow;
                         }
                         metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
                         return Ext.util.Format.number(SPSchedules.schedule_result > 0 ? SPSchedules.schedule_result : 0, "000.00");
@@ -1105,12 +1022,16 @@ Ext.define("release-progress-kpi", {
                     text: 'Features', 
                     dataIndex: 'Features',
                     flex: 1,
+                    // calculator: true,
+                    // leaves_only: true,
                     renderer: function(Features,metaData){
                         var color = 'ffffff';
-                        if(Features && Features.result < me.getSetting('featureThreshold')){
+                        if(Features && Features.result < me.getSetting('featureThresholdLow')){
                             color =  me.red;
-                        }else if (Features && Features.result >= me.getSetting('featureThreshold')){
+                        }else if (Features && Features.result >= me.getSetting('featureThresholdHigh')){
                             color = me.green;
+                        }else{
+                            color = me.yellow;
                         }
 
                         metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
@@ -1121,12 +1042,16 @@ Ext.define("release-progress-kpi", {
                     text: 'Velocity', 
                     dataIndex: 'Velocity',
                     flex: 1,
+                    // calculator: true,
+                    // leaves_only: true,
                     renderer: function(Velocity,metaData){
                         var color = 'ffffff';
-                        if(Velocity && Velocity.result < me.getSetting('velocityThreshold')){
+                        if(Velocity && Velocity.result < me.getSetting('velocityThresholdLow')){
                             color =  me.red;
-                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThreshold')){
+                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThresholdHigh')){
                             color =  me.green;
+                        }else{
+                            color = me.yellow;
                         }     
                         metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;      
                         return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
@@ -1181,9 +1106,87 @@ Ext.define("release-progress-kpi", {
                     }
                 }
             },
-            
             rootVisible: false
         });
+
+        me.down('#projectTreeGrid').expandAll();
+
+    },
+
+    _getColumns: function(){
+
+        return [
+                { xtype:'treecolumn', dataIndex:'Name', text:'PROJECT', flex: 2, menuDisabled: true},
+                {
+                    text: 'SP / Schedules', 
+                    dataIndex: 'SPSchedules',
+                    flex: 1,
+                    calculator: true,
+                    leaves_only: true,
+                    renderer: function(SPSchedules,metaData){
+                        var color = 'ffffff';
+                        if(SPSchedules.schedule_result < me.getSetting('scheduleThresholdLow')){
+                            color =  me.red;
+                        }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThresholdHigh')){
+                            color = me.green;
+                        }else {
+                            color = me.yellow;
+                        }
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
+                        return Ext.util.Format.number(SPSchedules.schedule_result > 0 ? SPSchedules.schedule_result : 0, "000.00");
+          
+                    }
+                    
+                },                
+                {
+                    text: 'Features', 
+                    dataIndex: 'Features',
+                    flex: 1,
+                    calculator: true,
+                    leaves_only: true,
+                    renderer: function(Features,metaData){
+                        var color = 'ffffff';
+                        if(Features && Features.result < me.getSetting('featureThresholdLow')){
+                            color =  me.red;
+                        }else if (Features && Features.result >= me.getSetting('featureThresholdHigh')){
+                            color = me.green;
+                        }else{
+                            color = me.yellow;
+                        }
+
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
+                        return Ext.util.Format.number(Features.result > 0 ? Features.result : 0, "000.00");
+                    }
+
+                },{
+                    text: 'Velocity', 
+                    dataIndex: 'Velocity',
+                    flex: 1,
+                    calculator: true,
+                    leaves_only: true,
+                    renderer: function(Velocity,metaData){
+                        var color = 'ffffff';
+                        if(Velocity && Velocity.result < me.getSetting('velocityThresholdLow')){
+                            color =  me.red;
+                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThresholdHigh')){
+                            color =  me.green;
+                        }else{
+                            color = me.yellow;
+                        }     
+                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;      
+                        return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
+
+                    }
+
+                },{
+                    text: 'Scope', 
+                    dataIndex: 'SPSchedules',
+                    flex: 1,
+                    renderer: function(SPSchedules){
+                        return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
+                    }
+                }
+            ];
 
     },
 
@@ -1228,3 +1231,9 @@ Ext.define("release-progress-kpi", {
         this.launch();
     }
 });
+
+function customizer(objValue, srcValue) {
+  if (_.isArray(objValue)) {
+    return objValue.concat(srcValue);
+  }
+}
