@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>release-progress-kpi</title>
+    <title>Release Progress KPIs</title>
     <!--  (c) 2015,2016 CA Technologies.  All Rights Reserved. -->
-    <!--  Build Date: Sun Jul 31 2016 15:51:27 GMT-0400 (EDT) -->
+    <!--  Build Date: Sat Aug 06 2016 14:29:13 GMT-0400 (EDT) -->
     
     <script type="text/javascript">
-        var APP_BUILD_DATE = "Sun Jul 31 2016 15:51:27 GMT-0400 (EDT)";
+        var APP_BUILD_DATE = "Sat Aug 06 2016 14:29:13 GMT-0400 (EDT)";
         var CHECKSUM = [%= checksum %];
     </script>
     
@@ -17,7 +17,7 @@
             
             
                Rally.launchApp('release-progress-kpi', {
-                   name: 'release-progress-kpi'
+                   name: 'Release Progress KPIs'
                });
         });
     </script>

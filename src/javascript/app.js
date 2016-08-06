@@ -105,7 +105,6 @@ Ext.define("release-progress-kpi", {
 
     launch: function() {
         var me = this;
-        me.columns = me._getColumns();
         me._addSelector();
     },
       
@@ -161,10 +160,6 @@ Ext.define("release-progress-kpi", {
        //get all projects on current scope
        //get selected release for current project and calculate the SP /Schedule
 
-       // Deft.Chain.parallel([
-       //      me._getProjects
-       //  ],me).then({
-
         Deft.Promise.all(me._getProjects()).then({            
             scope: me,
             success: function(records) {
@@ -174,13 +169,6 @@ Ext.define("release-progress-kpi", {
                 me._getTreeArray(records).then({
                     scope: me,
                     success:function(results){
-
-
-                        // Ext.Object.each(results, function(oid,item){
-                        //     item.set('SPSchedules',1);
-                        //     item.set('Features',2);
-                        //     item.set('Velocity',3);
-                        // });
 
                         var promises = [];
                         Ext.Array.each(records, function(record){
@@ -203,17 +191,17 @@ Ext.define("release-progress-kpi", {
                                     }
 
 
-                                    console.log('treeHash',results);
+                                    //console.log('treeHash',results);
 
                                     var root_items = me.constructRootItems(results);
 
-                                    console.log('root_items',root_items);
+                                    //console.log('root_items',root_items);
 
                                     var calculated_items = me._doColumnCalculations(root_items);
 
                                     var root_items_hash = me.convertModelsToHashes(calculated_items);
 
-                                    console.log('root_items_hash',root_items_hash);
+                                    //console.log('root_items_hash',root_items_hash);
                                     
                                     deferred.resolve(root_items_hash);
 
@@ -227,49 +215,6 @@ Ext.define("release-progress-kpi", {
                         console.log('Failed');
                     }
                 });
-
-
-                // //Loop thro the projects and get selected release data for each project and calculate SP /Schedule
-
-                // var promises = [];
-                // Ext.Array.each(records, function(record){
-                //     promises.push(function(){
-                //         return me._getCollection(record); 
-                //     });
-                // });
-
-                // Deft.Chain.sequence(promises).then({
-                //         success: function(results){
-                //             me.logger.log('_calculateGridValues',results);
-                //             //process the results.
-                //             var projects = [];
-                //                 for (var i = 0; records && i < records.length; i++) {
-                //                         var project = {
-                //                             ProjectName: records[i].get('Name'),
-                //                             SPSchedules:results[i][0],
-                //                             Features:results[i][1],
-                //                             Velocity:results[i][2]
-                //                         }
-                //                         projects.push(project);
-                //                 }
-                //                 me.logger.log('Projects >>',projects);
-                //                 // create custom store (call function ) combine permissions and results in to one.
-                //                 // var store = Ext.create('Rally.data.custom.Store', {
-                //                 //     data: projects,
-                //                 //     scope: this
-                //                 // });
-                //                 // deferred.resolve(store); 
-
-                //                 var store = Ext.create('Rally.data.custom.Store', {
-                //                     data: projects
-                //                 });
-
-                //             deferred.resolve(store);
-                //            // deferred.resolve(results);
-                //         },
-                //         scope:me                   
-                // });
-
 
             },
             failure: function(msg) {
@@ -327,7 +272,7 @@ Ext.define("release-progress-kpi", {
     // This is slightly different than the others. It is not a ratio, but a percent growth. It requires manual entry of a baseline story points number to understand what the starting scope should be. This is because they may not have the stories paired to the release on day one…if it was automatic, it might break and they would have no way to fix it. 
 
     // Calculation: 
-    // (Current story points planned to the release - baseline story points) / baseline story points. 
+    // (Current story points planned to the release - baseline story points) / baseline story points for each release by project. 
 
     // Example:
     // Current points planned to the release = 250. Baseline (manually entered setting) = 150. 
@@ -344,7 +289,16 @@ Ext.define("release-progress-kpi", {
         filters = [{property:'Project.ObjectID',value: project_obejctID},{property:'Name',value: release_name}];
 
         filter = Rally.data.wsapi.Filter.and(filters);
-        
+
+        var release_start_date = me.release.getRecord().get('ReleaseStartDate');
+        var release_end_date = me.release.getRecord().get('ReleaseDate');
+        var today = new Date();
+
+        var total_release_days = Math.abs( Rally.util.DateTime.getDifference(release_start_date,release_end_date,'day') );
+        var total_days_done = Math.abs( Rally.util.DateTime.getDifference(release_start_date,today,'day') );
+
+        //var per_sch_complete = total_days_done / total_release_days;
+
         Ext.create('Rally.data.wsapi.Store', {
             model: 'Release',
             fetch: ['ObjectID','Name','PlanEstimate','Accepted',baselinePointsFiled],
@@ -358,12 +312,13 @@ Ext.define("release-progress-kpi", {
 
                     if(records[0] && records[0].get('PlanEstimate') > 0){
 
-                        result.total = records[0].get('PlanEstimate');
+                        result.total_points = records[0].get('PlanEstimate');
                         result.accepted = records[0].get('Accepted');
-                        result.expected = (records[0].get('Accepted') / records[0].get('PlanEstimate')) * 100 ;
                         result.baseline = records[0].get(baselinePointsFiled);
+                        result.per_sch_complete =  total_days_done / total_release_days;
+                        // result.expected =  result.per_sch_complete * result.total_points;
 
-                        result.schedule_result = records[0].get('Accepted') / result.expected;
+                        // result.schedule_result = records[0].get('Accepted') / result.expected;
                         result.scope = result.baseline > 0 ? ((records[0].get('PlanEstimate') - result.baseline) / result.baseline) * 100 :0;
                     }
                     deferred.resolve(result);
@@ -391,8 +346,8 @@ Ext.define("release-progress-kpi", {
         var deferred = Ext.create('Deft.Deferred');
         var me = this;
         var release_name = me.release.rawValue;
-        var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
-        var release_end_date = me.release.valueModels[0].get('ReleaseDate');
+        var release_start_date = me.release.getRecord().get('ReleaseStartDate');
+        var release_end_date = me.release.getRecord().get('ReleaseDate');
         var project_obejctID = project.get('ObjectID');
         
         var today = new Date();
@@ -418,31 +373,24 @@ Ext.define("release-progress-kpi", {
                     me.logger.log('_getIterations',records);
                     var velocity = {};
                     velocity.result = 0;
-                    var result = 0;
-                    var past_velocity = 0;
-                    var past_velocity_length = 0;
-                    var future_velocity_length = 0;
-                    var remining_plan_estimate = 0;
+                    velocity.past_total = 0;
+                    velocity.past_length = 0;
+                    velocity.remining_total = 0;
+                    velocity.remining_length = 0;
 
                     Ext.Array.each(records,function(iteration){
                         if(iteration.get('EndDate') < today){
-                            past_velocity += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
-                            past_velocity_length += 1;
+                            velocity.past_total += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+                            velocity.past_length += 1;
                         }else{
-                            remining_plan_estimate += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
-                            future_velocity_length += 1;
+                            velocity.remining_total += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
+                            velocity.remining_length += 1;
                         }
                     });
 
-                    var avg_velocity = past_velocity / past_velocity_length;
+                    // velocity.average = velocity.past_total / velocity.past_length;
 
-                    velocity.average = avg_velocity;
-                    velocity.remining_scope = remining_plan_estimate;
-                    velocity.remining_sprints = future_velocity_length;
-
-                    velocity.result = avg_velocity > 0 &&  remining_plan_estimate > 0 && future_velocity_length > 0 ? avg_velocity / (remining_plan_estimate/future_velocity_length) : 0;
-                                    
-                    me.logger.log('_getVelocity', result, velocity , past_velocity_length,avg_velocity,remining_plan_estimate,future_velocity_length)
+                    // velocity.result = velocity.average > 0 &&  velocity.remining_total > 0 && velocity.remining_length > 0 ? velocity.average / (velocity.remining_total/velocity.remining_length) : 0;
 
                     deferred.resolve(velocity);
 
@@ -455,122 +403,7 @@ Ext.define("release-progress-kpi", {
         return deferred.promise; 
     },
 
-    // _calculateVelocity: function(project){
-    //     var deferred = Ext.create('Deft.Deferred');
-    //     var me = this;
-    //     var iteration_promises = [];
-
-    //     iteration_promises.push(function(){
-    //         return me._getPastIterations(project); 
-    //     });
-
-    //     iteration_promises.push(function(){
-    //         return me._getFutureIterations(project);
-    //     });
-
-    //     Deft.Chain.sequence(iteration_promises).then({
-    //         success: function(results){
-    //             me.logger.log('_calculateVelocity',results);
-    //             var result = 0;
-    //             var velocity = 0;
-    //             var remining_plan_estimate = 0;
-
-    //             Ext.Array.each(results[0],function(iteration){
-    //                 velocity += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
-    //             });
-
-    //             Ext.Array.each(results[1],function(iteration){
-    //                 remining_plan_estimate += iteration.get('PlanEstimate') ? iteration.get('PlanEstimate') : 0;
-    //             });
-
-    //             var avg_velocity = velocity / results[0].length;
-
-    //             deferred.resolve(result);
-    //         },
-    //         scope:me                   
-    //     });
-
-    //     return deferred.promise;
-    // },
-
-    // _getPastIterations: function(project){
-    //     var deferred = Ext.create('Deft.Deferred');
-    //     var me = this;
-    //     var release_name = me.release.rawValue;
-    //     var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
-    //     var release_end_date = me.release.valueModels[0].get('ReleaseDate');
-    //     var project_obejctID = project.get('ObjectID');
-        
-    //     filters = [{property:'Project.ObjectID',value: project_obejctID},
-    //                 {property:'EndDate', operator: '<=', value: release_end_date},
-    //                 {property:'StartDate', operator: '>=', value:release_start_date }];
-
-    //     filter = Rally.data.wsapi.Filter.and(filters);
-        
-    //     Ext.create('Rally.data.wsapi.Store', {
-    //         model: 'Iteration',
-    //         fetch: ['ObjectID','Name','PlanEstimate','PlannedVelocity'],
-    //         filters: filter,
-    //         sorters: [{
-    //                     property: 'EndDate',
-    //                     direction: 'DESC'
-    //                 }]
-    //         //        ,
-    //         // limit: 3,
-    //         // pageSize: 3
-    //     }).load({
-    //         callback : function(records, operation, successful) {
-    //             if (successful){
-    //                 me.logger.log('_getIterations',records);
-    //                 deferred.resolve(records);
-    //             } else {
-    //                 me.logger.log("Failed: ", operation);
-    //                 deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
-    //             }
-    //         }
-    //     });
-    //     return deferred.promise;        
-    // },
-
-    // _getFutureIterations: function(project){
-    //     var deferred = Ext.create('Deft.Deferred');
-    //     var me = this;
-    //     var release_name = me.release.rawValue;
-    //     var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
-    //     var release_end_date = me.release.valueModels[0].get('ReleaseDate');
-    //     var project_obejctID = project.get('ObjectID');
-        
-    //     var today = Ext.Date.format(new Date(), 'Y-m-d');
-
-    //     var filters = [{property:'Project.ObjectID',value: project_obejctID},
-    //                 {property:'EndDate', operator: '>', value: today},
-    //                 {property:'EndDate', operator: '<=', value: release_end_date},
-    //                 {property:'StartDate', operator: '>=', value:release_start_date }];
-
-    //     var filter = Rally.data.wsapi.Filter.and(filters);
-        
-    //     Ext.create('Rally.data.wsapi.Store', {
-    //         model: 'Iteration',
-    //         fetch: ['ObjectID','Name','PlanEstimate'],
-    //         filters: filter,
-    //         sorters: [{
-    //                     property: 'EndDate',
-    //                     direction: 'DESC'
-    //                 }]
-    //     }).load({
-    //         callback : function(records, operation, successful) {
-    //             if (successful){
-    //                 me.logger.log('_getIterations',records);
-    //                 deferred.resolve(records);
-    //             } else {
-    //                 me.logger.log("Failed: ", operation);
-    //                 deferred.reject('Problem loading: ' + operation.error.errors.join('. '));
-    //             }
-    //         }
-    //     });
-    //     return deferred.promise;        
-    // },
-
+ 
     // 2) Features.  
     // Measures whether the team has completed features in accordance with a rate that would be required to finish all planned features by the end of the release. 
 
@@ -587,21 +420,17 @@ Ext.define("release-progress-kpi", {
         var deferred = Ext.create('Deft.Deferred');
         var me = this;
         var release_name = me.release.rawValue;
-        var project_obejctID = project.get('ObjectID');
+        var project_obejctID = project.get('ObjectID');        
         filters = [{property:'Project.ObjectID',value: project_obejctID},{property:'Release.Name',value: release_name}];
 
-        var release_start_date = me.release.valueModels[0].get('ReleaseStartDate');
-        var release_end_date = me.release.valueModels[0].get('ReleaseDate');
+        var release_start_date = me.release.getRecord().get('ReleaseStartDate');
+        var release_end_date = me.release.getRecord().get('ReleaseDate');
         var today = new Date();
 
-        var project_obejctID = project.get('ObjectID');
-        
         var total_release_days = Math.abs( Rally.util.DateTime.getDifference(release_start_date,release_end_date,'day') );
         var total_days_done = Math.abs( Rally.util.DateTime.getDifference(release_start_date,today,'day') );
         
-        var per_sch_complete = total_days_done / total_release_days;
-
-        console.log('total_release_days,total_days_done>>',total_release_days,total_days_done);
+        //console.log('total_release_days,total_days_done>>',total_release_days,total_days_done);
 
         filter = Rally.data.wsapi.Filter.and(filters);
         
@@ -613,10 +442,10 @@ Ext.define("release-progress-kpi", {
             callback : function(records, operation, successful) {
                 if (successful){
                     var feature = {};
-                    feature.result = 0;
+                    feature.per_sch_complete = total_days_done / total_release_days;
+                    //feature.result = 0;
                     feature.total = records.length;
                     feature.accepted = 0;
-                    feature.expected = per_sch_complete * feature.total;
                     
                     Ext.Array.each(records,function(rec){
                         if(1 == rec.get('PercentDoneByStoryCount')){
@@ -624,9 +453,11 @@ Ext.define("release-progress-kpi", {
                         }
                     });
 
-                    if(feature.total > 0 ){
-                        feature.result = feature.accepted / feature.expected;
-                    }
+                    //feature.expected = per_sch_complete * feature.total;
+
+                    // if(feature.total > 0 ){
+                    //     feature.result = feature.accepted / feature.expected;
+                    // }
 
                     deferred.resolve(feature);
 
@@ -739,7 +570,7 @@ Ext.define("release-progress-kpi", {
      * Given an array of models, turn them into hashes
      */
     convertModelsToHashes: function(model_array) {
-        console.log('convertModelsToHashes input>>',model_array);
+        //console.log('convertModelsToHashes input>>',model_array);
         var hash_array = [];
         Ext.Array.each(model_array,function(model){
             if (this.isModel(model)) {
@@ -769,16 +600,17 @@ Ext.define("release-progress-kpi", {
                 hash_array.push(model);
             }
         },this);
-        console.log('convertModelsToHashes output>>',hash_array);
+        //console.log('convertModelsToHashes output>>',hash_array);
         return hash_array;
     },
+
     isModel: function(model){
         return model && ( model instanceof Ext.data.Model );
     },
 
 
     constructRootItems:function(item_hash) {
-        console.log('constructRootItems output>>',item_hash);        
+        //console.log('constructRootItems output>>',item_hash);        
         var root_array = [];
         Ext.Object.each(item_hash, function(oid,item){
             if ( !item.get('children') ) { item.set('children',[]); }
@@ -802,7 +634,7 @@ Ext.define("release-progress-kpi", {
                 }
             }
         },this);
-        console.log('constructRootItems output>>',root_array);        
+        //console.log('constructRootItems output>>',root_array);        
 
         return root_array;
     },
@@ -919,7 +751,7 @@ Ext.define("release-progress-kpi", {
             var child_value = child_item.get(field_name) || {};
             parent_value =  this._addValues(parent_value,child_value);
         },this);
-        console.log('field_name,parent_value',field_name,parent_value);
+        //console.log('field_name,parent_value',field_name,parent_value);
         parent_item.set(field_name,parent_value);
         return;
     },
@@ -927,7 +759,9 @@ Ext.define("release-progress-kpi", {
     _addValues:function(parent_value,child_value){
         if(Object.keys(child_value).length === 0) return parent_value;
         Ext.Object.each(parent_value,function(key,value){ 
-            parent_value[key] += child_value[key]
+            if(key != 'per_sch_complete'){
+                parent_value[key] += child_value[key]
+            }
         });
         return parent_value;
     },
@@ -1001,10 +835,12 @@ Ext.define("release-progress-kpi", {
                     text: 'SP / Schedules', 
                     dataIndex: 'SPSchedules',
                     flex: 1,
-                    // calculator: true,
-                    // leaves_only: true,
+
                     renderer: function(SPSchedules,metaData){
                         var color = 'ffffff';
+                        SPSchedules.schedule_result = SPSchedules.accepted / (SPSchedules.total_points * SPSchedules.per_sch_complete);
+
+
                         if(SPSchedules.schedule_result < me.getSetting('scheduleThresholdLow')){
                             color =  me.red;
                         }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThresholdHigh')){
@@ -1022,10 +858,13 @@ Ext.define("release-progress-kpi", {
                     text: 'Features', 
                     dataIndex: 'Features',
                     flex: 1,
-                    // calculator: true,
-                    // leaves_only: true,
                     renderer: function(Features,metaData){
                         var color = 'ffffff';
+
+
+
+                        Features.result = Features.total > 0 ? Features.accepted / (Features.total * Features.per_sch_complete):0;                        
+                 
                         if(Features && Features.result < me.getSetting('featureThresholdLow')){
                             color =  me.red;
                         }else if (Features && Features.result >= me.getSetting('featureThresholdHigh')){
@@ -1042,19 +881,27 @@ Ext.define("release-progress-kpi", {
                     text: 'Velocity', 
                     dataIndex: 'Velocity',
                     flex: 1,
-                    // calculator: true,
-                    // leaves_only: true,
-                    renderer: function(Velocity,metaData){
+                    renderer: function(Velocity,metaData,record){
                         var color = 'ffffff';
-                        if(Velocity && Velocity.result < me.getSetting('velocityThresholdLow')){
-                            color =  me.red;
-                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThresholdHigh')){
-                            color =  me.green;
+                    
+                        Velocity.average = Velocity.past_total / Velocity.past_length;
+
+                        Velocity.result = Velocity.average > 0 &&  Velocity.remining_total > 0 && Velocity.remining_length > 0 ? Velocity.average / (Velocity.remining_total/Velocity.remining_length) : 0;
+
+                        if(record.get('leaf')){
+                            if(Velocity && Velocity.result < me.getSetting('velocityThresholdLow')){
+                                color =  me.red;
+                            }else if (Velocity && Velocity.result >= me.getSetting('velocityThresholdHigh')){
+                                color =  me.green;
+                            }else{
+                                color = me.yellow;
+                            }     
+                            metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;                                
+                            return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
                         }else{
-                            color = me.yellow;
-                        }     
-                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;      
-                        return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
+                            metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;   
+                            return 'NA';
+                        }
 
                     }
 
@@ -1062,8 +909,13 @@ Ext.define("release-progress-kpi", {
                     text: 'Scope', 
                     dataIndex: 'SPSchedules',
                     flex: 1,
-                    renderer: function(SPSchedules){
-                        return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
+                    renderer: function(SPSchedules,metaData,record){
+                        if(record.get('leaf')){
+                            return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
+                        }else{
+                            return 'NA';
+                        }
+                        
                     }
                 }
             ],
@@ -1074,12 +926,17 @@ Ext.define("release-progress-kpi", {
                     if (column > 0 && column < 5) {
                         var column_index = view.up().columns[column].dataIndex;
                         var column_title = view.up().columns[column].text;
-                        if('SP / Schedules' == column_title || 'Features' == column_title ){
+                        if('SP / Schedules' == column_title ){
                             var column_value = record.get(column_index)
+                            column_value.expected =  column_value.per_sch_complete * column_value.total_points;
+                            var html = "Total Scope: "+column_value.total_points +"<br>"+"Accepted: "+column_value.accepted +"<br>"+"Expected: "+Math.round(column_value.expected) +"<br>";
+                        }else if('Features' == column_title ){
+                            var column_value = record.get(column_index)
+                            column_value.expected =  column_value.per_sch_complete * column_value.total;
                             var html = "Total Scope: "+column_value.total +"<br>"+"Accepted: "+column_value.accepted +"<br>"+"Expected: "+Math.round(column_value.expected) +"<br>";
                         }else if('Velocity' == column_title){
                             var column_value = record.get(column_index)
-                            var html = "Average Velocity: "+column_value.average +"<br>"+"Remining Scope: "+column_value.remining_scope +"<br>"+"Remining Sprints: "+column_value.remining_sprints +"<br>";
+                            var html = "Average Velocity: "+column_value.average +"<br>"+"Remining Scope: "+column_value.remining_total +"<br>"+"Remining Sprints: "+column_value.remining_length +"<br>";
                         }else if('Scope' == column_title){
                             var column_value = record.get(column_index)
                             var html = "Total Scope: "+column_value.total +"<br>"+"Baseline Points: "+column_value.baseline +"<br>";
@@ -1101,7 +958,7 @@ Ext.define("release-progress-kpi", {
                                         });
                         popover.show();
 
-                        console.log("click",column_index,record, record.get(column_index));
+                        //console.log("click",column_index,record, record.get(column_index));
                         
                     }
                 }
@@ -1111,97 +968,6 @@ Ext.define("release-progress-kpi", {
 
         me.down('#projectTreeGrid').expandAll();
 
-    },
-
-    _getColumns: function(){
-
-        return [
-                { xtype:'treecolumn', dataIndex:'Name', text:'PROJECT', flex: 2, menuDisabled: true},
-                {
-                    text: 'SP / Schedules', 
-                    dataIndex: 'SPSchedules',
-                    flex: 1,
-                    calculator: true,
-                    leaves_only: true,
-                    renderer: function(SPSchedules,metaData){
-                        var color = 'ffffff';
-                        if(SPSchedules.schedule_result < me.getSetting('scheduleThresholdLow')){
-                            color =  me.red;
-                        }else if (SPSchedules.schedule_result >= me.getSetting('scheduleThresholdHigh')){
-                            color = me.green;
-                        }else {
-                            color = me.yellow;
-                        }
-                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
-                        return Ext.util.Format.number(SPSchedules.schedule_result > 0 ? SPSchedules.schedule_result : 0, "000.00");
-          
-                    }
-                    
-                },                
-                {
-                    text: 'Features', 
-                    dataIndex: 'Features',
-                    flex: 1,
-                    calculator: true,
-                    leaves_only: true,
-                    renderer: function(Features,metaData){
-                        var color = 'ffffff';
-                        if(Features && Features.result < me.getSetting('featureThresholdLow')){
-                            color =  me.red;
-                        }else if (Features && Features.result >= me.getSetting('featureThresholdHigh')){
-                            color = me.green;
-                        }else{
-                            color = me.yellow;
-                        }
-
-                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color                       
-                        return Ext.util.Format.number(Features.result > 0 ? Features.result : 0, "000.00");
-                    }
-
-                },{
-                    text: 'Velocity', 
-                    dataIndex: 'Velocity',
-                    flex: 1,
-                    calculator: true,
-                    leaves_only: true,
-                    renderer: function(Velocity,metaData){
-                        var color = 'ffffff';
-                        if(Velocity && Velocity.result < me.getSetting('velocityThresholdLow')){
-                            color =  me.red;
-                        }else if (Velocity && Velocity.result >= me.getSetting('velocityThresholdHigh')){
-                            color =  me.green;
-                        }else{
-                            color = me.yellow;
-                        }     
-                        metaData.style = 'padding-right:7px;text-align:right;background-color:'+color;      
-                        return Ext.util.Format.number(Velocity.result > 0 ? Velocity.result : 0, "000.00");
-
-                    }
-
-                },{
-                    text: 'Scope', 
-                    dataIndex: 'SPSchedules',
-                    flex: 1,
-                    renderer: function(SPSchedules){
-                        return Ext.util.Format.number(SPSchedules.scope ? SPSchedules.scope : 0, "000.00")+'%';
-                    }
-                }
-            ];
-
-    },
-
-    _magicRenderer: function(field,value,meta_data,record){
-        var field_name = field.name || field.get('name');
-        var record_type = record.get('_type');
-        var model = this.models[record_type];
-        // will fail fi field is not on the record
-        // (e.g., we pick accepted date, by are also showing features
-        try {
-            var template = Rally.ui.renderer.RendererFactory.getRenderTemplate(model.getField(field_name)) || "";
-            return template.apply(record.data);
-        } catch(e) {
-            return ".";
-        }
     },
 
 
