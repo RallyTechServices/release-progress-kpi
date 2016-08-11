@@ -23,7 +23,7 @@ Ext.define("release-progress-kpi", {
 
     config: {
         defaultSettings: {
-            baselinePointsFiled: 'c_BaseLinePoints',
+            baselinePointsField: 'c_BaseLinePoints',
             scheduleThresholdLow: 0.8,
             featureThresholdLow: 0.8,
             velocityThresholdLow: 0.8,
@@ -38,7 +38,8 @@ Ext.define("release-progress-kpi", {
  
         return  [
             {
-                name: 'baselinePointsFiled',
+                name: 'baselinePointsField',
+                fieldLabel: 'Baseline Points Field',
                 xtype: 'rallyfieldcombobox',
                 model: 'Release',
                 labelWidth: 125,
@@ -284,7 +285,7 @@ Ext.define("release-progress-kpi", {
         var me = this;
         var release_name = me.release.rawValue;
         var project_obejctID = project.get('ObjectID');
-        var baselinePointsFiled = me.getSetting('baselinePointsFiled');
+        var baselinePointsField = me.getSetting('baselinePointsField');
 
         filters = [{property:'Project.ObjectID',value: project_obejctID},{property:'Name',value: release_name}];
 
@@ -301,7 +302,7 @@ Ext.define("release-progress-kpi", {
 
         Ext.create('Rally.data.wsapi.Store', {
             model: 'Release',
-            fetch: ['ObjectID','Name','PlanEstimate','Accepted',baselinePointsFiled],
+            fetch: ['ObjectID','Name','PlanEstimate','Accepted',baselinePointsField],
             filters: filter
         }).load({
             callback : function(records, operation, successful) {
@@ -314,7 +315,7 @@ Ext.define("release-progress-kpi", {
 
                         result.total_points = records[0].get('PlanEstimate');
                         result.accepted = records[0].get('Accepted');
-                        result.baseline = records[0].get(baselinePointsFiled);
+                        result.baseline = records[0].get(baselinePointsField);
                         result.per_sch_complete =  total_days_done / total_release_days;
                         // result.expected =  result.per_sch_complete * result.total_points;
 
@@ -929,17 +930,17 @@ Ext.define("release-progress-kpi", {
                         if('SP / Schedules' == column_title ){
                             var column_value = record.get(column_index)
                             column_value.expected =  column_value.per_sch_complete * column_value.total_points;
-                            var html = "Total Scope: "+column_value.total_points +"<br>"+"Accepted: "+column_value.accepted +"<br>"+"Expected: "+Math.round(column_value.expected) +"<br>";
+                            var html = "Total Scope: "+(column_value.total_points ? column_value.total_points:0) +"<br>"+"Accepted: "+(column_value.accepted ? column_value.accepted:0) +"<br>"+"Expected: "+(column_value.expected ? Math.round(column_value.expected):0) +"<br>";
                         }else if('Features' == column_title ){
                             var column_value = record.get(column_index)
                             column_value.expected =  column_value.per_sch_complete * column_value.total;
-                            var html = "Total Scope: "+column_value.total +"<br>"+"Accepted: "+column_value.accepted +"<br>"+"Expected: "+Math.round(column_value.expected) +"<br>";
+                            var html = "Total Scope: "+(column_value.total ? column_value.total :0) +"<br>"+"Accepted: "+(column_value.accepted ? column_value.accepted : 0) +"<br>"+"Expected: "+(column_value.expected ? Math.round(column_value.expected):0)  +"<br>";
                         }else if('Velocity' == column_title){
                             var column_value = record.get(column_index)
-                            var html = "Average Velocity: "+column_value.average +"<br>"+"Remining Scope: "+column_value.remining_total +"<br>"+"Remining Sprints: "+column_value.remining_length +"<br>";
+                            var html = "Average Velocity: "+(column_value.average ? column_value.average:0)+"<br>"+"Remining Scope: "+(column_value.remining_total ? column_value.remining_total:0)+"<br>"+"Remining Sprints: "+(column_value.remining_length ? column_value.remining_length :0)+"<br>";
                         }else if('Scope' == column_title){
                             var column_value = record.get(column_index)
-                            var html = "Total Scope: "+column_value.total +"<br>"+"Baseline Points: "+column_value.baseline +"<br>";
+                            var html = "Total Scope: "+ (column_value.total_points ? column_value.total_points:0) +"<br>"+"Baseline Points: "+(column_value.baseline ? column_value.baseline :0) +"<br>";
                         }else{
                             var html = "Value:" + record.get(column_index)
                         }
